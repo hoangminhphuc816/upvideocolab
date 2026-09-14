@@ -67,6 +67,11 @@
 ## 9. Test tích hợp thật (theo thứ tự)
 
 ### a) Smoke 100MB (chạy local, không qua Actions)
+
+> Yêu cầu local: `pip install -r requirements.txt` + `ffmpeg` có sẵn
+> (`ffprobe -version`). Thiếu `ffprobe` sẽ khiến job bị `FAILED` vĩnh viễn
+> do trùng substring kiểm tra trong worker.
+
 ```bash
 export TELETHON_SESSION=... TELEGRAM_API_ID=... TELEGRAM_API_HASH=... \
        TARGET_CHANNEL=-100... OWNER_CHAT_ID=... GCP_SA_JSON='...' \
@@ -102,7 +107,7 @@ python -m worker.main
 | `AuthKeyDuplicatedError` Telethon | 1 session dùng 2 nơi — chắc chắn không chạy worker local song song với Actions |
 | `FloodWaitError` | Worker đã set flood_sleep_threshold=120; nếu vẫn chờ lâu hơn, để job treo → sweep RETRY |
 | Sheet `PERMISSION_DENIED` | SA chưa được Share Editor Sheet |
-| Video không stream được trong kênh | File không phải MP4 chuẩn (codec) — ffprobe đã chặn từ bước download |
+| Video không stream được trong kênh | ffprobe chặn file không có video stream; codec lạ (vd HEVC/mkv) vẫn qua ffprobe nhưng kênh có thể không stream được |
 | `ffprobe`/`ffmpeg` thiếu | Kiểm tra workflow job có step `Cài ffprobe` |
 | Exit code 1 (Actions đỏ) | Lỗi tạm thời — không can thiệp, sweep tự RETRY |
 | Exit code 2 (Actions đỏ) | Lỗi vĩnh viễn — xem cột error trên Sheet |
