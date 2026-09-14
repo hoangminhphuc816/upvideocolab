@@ -32,7 +32,9 @@ async def test_upload_returns_message_id_and_disconnects():
     assert kwargs["caption"] == "JOB-1"
     assert kwargs["supports_streaming"] is True
     assert callable(kwargs["progress_callback"])
-    tc.assert_called_once()
+    args_tc, kwargs_tc = tc.call_args
+    assert kwargs_tc["flood_sleep_threshold"] == 120
+    assert "connections" not in kwargs_tc
     client.disconnect.assert_awaited()
 
 
@@ -46,4 +48,16 @@ async def test_upload_wraps_errors():
          patch("worker.uploader.StringSession"):
         with pytest.raises(UploadError, match="boom"):
             await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
-    client.disconnect.assert_awaited()  # vẫn disconnect khi lỗi
+    client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upload_start_failure_wraps_and_disconnects():
+    client = MagicMock()
+    client.start = AsyncMock(side_effect=RuntimeError("start boom"))
+    client.disconnect = AsyncMock()
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        with pytest.raises(UploadError, match="start boom"):
+            await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+    client.disconnect.assert_awaited()

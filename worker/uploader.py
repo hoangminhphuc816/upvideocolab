@@ -24,21 +24,32 @@ async def _safe_disconnect(client: TelegramClient) -> None:
 
 
 async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
-    client = TelegramClient(
-        StringSession(cfg.telethon_session),
-        cfg.api_id,
-        cfg.api_hash,
-        flood_sleep_threshold=120,
-    )
+    try:
+        client = TelegramClient(
+            StringSession(cfg.telethon_session),
+            cfg.api_id,
+            cfg.api_hash,
+            flood_sleep_threshold=120,
+        )
+    except Exception as e:
+        raise UploadError(f"không tạo được TelegramClient: {type(e).__name__}: {e}") from None
+
     try:
         await asyncio.wait_for(client.start(), timeout=180)
     except Exception as e:
         await _safe_disconnect(client)
-        raise UploadError(f"không kết nối được Telegram: {e}") from None
+        raise UploadError(f"không kết nối được Telegram: {type(e).__name__}: {e}") from None
+
+    last = -1
 
     def progress(sent: int, total: int) -> None:
-        if total and sent * 100 // total % 10 == 0:
-            log.info("upload %s: %d%%", caption, sent * 100 // total)
+        nonlocal last
+        if not total:
+            return
+        pct = sent * 100 // total
+        if pct % 10 == 0 and pct != last:
+            last = pct
+            log.info("upload %s: %d%%", caption, pct)
 
     try:
         msg = await client.send_file(
@@ -50,6 +61,6 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
         )
         return msg.id
     except Exception as e:
-        raise UploadError(f"send_file thất bại: {e}") from None
+        raise UploadError(f"send_file thất bại: {type(e).__name__}: {e}") from None
     finally:
         await _safe_disconnect(client)
