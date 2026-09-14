@@ -76,6 +76,7 @@
 export TELETHON_SESSION=... TELEGRAM_API_ID=... TELEGRAM_API_HASH=... \
        TARGET_CHANNEL=-100... OWNER_CHAT_ID=... GCP_SA_JSON='...' \
        SHEET_ID=... BOT_TOKEN=... DL_DIR=/tmp
+# Lần chạy đầu với session mới, worker tự warm entity cache (get_dialogs) — nếu channel ID sai (-100...), lỗi sẽ là PeerIdInvalid và job FAILED vĩnh viễn: kiểm tra lại TARGET_CHANNEL.
 python -m worker.main
 # Trước đó: tự append 1 hàng PENDING vào Sheet với URL MP4 ~100MB công khai.
 # Kỳ vọng: video xuất hiện trong kênh; hàng Sheet = DONE + msg_id; tin nhắn ✅.

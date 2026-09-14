@@ -17,6 +17,8 @@ def _set_env(monkeypatch, **over):
     env.update(over)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
+    monkeypatch.delenv("SHEET_NAME", raising=False)
+    monkeypatch.delenv("DL_DIR", raising=False)
 
 
 def test_load_config_ok(monkeypatch):
