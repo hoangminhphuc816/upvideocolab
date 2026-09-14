@@ -31,8 +31,8 @@ function pipelineCreateJobAndDispatch(mp4Url, chatId) {
 
 /**
  * POST repository_dispatch để kích hoạt worker ngay (không đợi cron).
- * Nếu thất bại: KHÔNG throw — job vẫn PENDING, cron sweep của Actions
- * sẽ nhặt trong tối đa 2h.
+ * Nếu thất bại: KHÔNG throw — job vẫn PENDING; cron sweep của Actions
+ * sẽ đánh dấu RETRY trong ≤ ~2h và job được xử lý ở lần chạy worker kế tiếp.
  */
 function dispatchToGitHub(jobId) {
   var props = PropertiesService.getScriptProperties();
@@ -42,19 +42,24 @@ function dispatchToGitHub(jobId) {
     console.warn('Thiếu GITHUB_PAT hoặc WORKER_REPO trong Script Properties');
     return -1;
   }
-  var resp = UrlFetchApp.fetch('https://api.github.com/repos/' + repo + '/dispatches', {
-    method: 'post',
-    contentType: 'application/json',
-    headers: {
-      'Authorization': 'token ' + pat,
-      'Accept': 'application/vnd.github+json'
-    },
-    payload: JSON.stringify({
-      event_type: 'video-job',
-      client_payload: { job_id: jobId }
-    }),
-    muteHttpExceptions: true
-  });
+  try {
+    var resp = UrlFetchApp.fetch('https://api.github.com/repos/' + repo + '/dispatches', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: {
+        'Authorization': 'token ' + pat,
+        'Accept': 'application/vnd.github+json'
+      },
+      payload: JSON.stringify({
+        event_type: 'video-job',
+        client_payload: { job_id: jobId }
+      }),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    console.warn('repository_dispatch lỗi transport: ' + err);
+    return -1;
+  }
   if (resp.getResponseCode() !== 204) {
     console.warn('repository_dispatch != 204: ' + resp.getResponseCode()
         + ' ' + resp.getContentText());
