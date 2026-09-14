@@ -1,0 +1,4 @@
+telethon==1.45.0
+cryptg==0.5.0
+gspread>=6.0,<7
+requests>=2.32,<3
