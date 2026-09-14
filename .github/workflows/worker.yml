@@ -1,0 +1,70 @@
+name: video-worker
+
+on:
+  repository_dispatch:
+    types: [video-job]
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Chế độ chạy"
+        type: choice
+        options: [worker, sweep]
+        default: worker
+
+concurrency:
+  group: video-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    if: >-
+      github.event_name == 'repository_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'worker')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TELETHON_SESSION: ${{ secrets.TELETHON_SESSION }}
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
+      OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+      GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
+      SHEET_ID: ${{ secrets.SHEET_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cài ffprobe
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Cài dependencies
+        run: pip install -r requirements.txt
+      - name: Chạy worker (1 job)
+        run: python -m worker.main
+
+  sweep:
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'sweep')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+      GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
+      SHEET_ID: ${{ secrets.SHEET_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cài dependencies
+        run: pip install -r requirements.txt
+      - name: Sweep job treo
+        run: python -m worker.main --sweep
