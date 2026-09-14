@@ -52,12 +52,14 @@ async def test_run_once_claim_miss_returns_zero_without_processing():
 
 
 @pytest.mark.asyncio
-async def test_run_once_full_success_flow():
+async def test_run_once_full_success_flow(tmp_path):
     q = MagicMock()
     q.next_job.return_value = make_job()
     q.claim.return_value = True
+    fake = tmp_path / "v.mp4"
+    fake.write_bytes(b"")
     with patch("worker.main.SheetQueue", return_value=q), \
-         patch("worker.main.download_to_file", return_value=("/tmp/v.mp4", 1024)), \
+         patch("worker.main.download_to_file", return_value=(str(fake), 1024)), \
          patch("worker.main.validate_video"), \
          patch("worker.main.upload_to_channel", AsyncMock(return_value=777)), \
          patch("worker.main.notify_done") as nd, \
@@ -69,6 +71,7 @@ async def test_run_once_full_success_flow():
     q.record_message_id.assert_called_once_with("JOB-1", 777)
     nd.assert_called_once()
     nf.assert_not_called()
+    assert not fake.exists(), "temp video should be cleaned up after success"
 
 
 @pytest.mark.asyncio
@@ -90,6 +93,22 @@ async def test_run_once_permanent_error_marks_failed_and_notifies():
 
 
 @pytest.mark.asyncio
+async def test_run_once_permanent_notify_failed_swallowed_keeps_rc2():
+    from worker.notifier import NotifyError
+    q = MagicMock()
+    q.next_job.return_value = make_job()
+    q.claim.return_value = True
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.download_to_file",
+               side_effect=DownloadError("HTTP 404 khi tải")), \
+         patch("worker.main.notify_failed", side_effect=NotifyError("bot API lỗi")):
+        from worker.main import run_once
+        rc = await run_once(make_cfg())
+    assert rc == 2
+    assert statuses_written(q) == ["DOWNLOADING", "FAILED"]
+
+
+@pytest.mark.asyncio
 async def test_run_once_transient_error_reraises_without_failed():
     q = MagicMock()
     q.next_job.return_value = make_job()
@@ -107,19 +126,22 @@ async def test_run_once_transient_error_reraises_without_failed():
 
 
 @pytest.mark.asyncio
-async def test_run_once_notify_failure_does_not_break_success():
+async def test_run_once_notify_failure_does_not_break_success(tmp_path):
     from worker.notifier import NotifyError
     q = MagicMock()
     q.next_job.return_value = make_job()
     q.claim.return_value = True
+    fake = tmp_path / "v.mp4"
+    fake.write_bytes(b"")
     with patch("worker.main.SheetQueue", return_value=q), \
-         patch("worker.main.download_to_file", return_value=("/tmp/v.mp4", 1024)), \
+         patch("worker.main.download_to_file", return_value=(str(fake), 1024)), \
          patch("worker.main.validate_video"), \
          patch("worker.main.upload_to_channel", AsyncMock(return_value=777)), \
          patch("worker.main.notify_done", side_effect=NotifyError("bot API lỗi")):
         from worker.main import run_once
         rc = await run_once(make_cfg())
     assert rc == 0  # notify là best-effort, không phá DONE
+    assert not fake.exists(), "temp video should be cleaned up even when notify_done fails"
 
 
 def test_run_sweep_notifies_newly_failed():
@@ -135,9 +157,15 @@ def test_run_sweep_notifies_newly_failed():
 
 def test_permanent_substrings():
     from worker.main import _permanent
+    assert _permanent("HTTP 400 khi tải")
+    assert _permanent("HTTP 403 khi tải")
     assert _permanent("HTTP 404 khi tải")
+    assert _permanent("HTTP 410 khi tải")
     assert _permanent("file vượt giới hạn 2GB")
+    assert _permanent("file rỗng")
     assert _permanent("ffprobe không đọc được video stream")
     assert _permanent("send_file thất bại: ... (PeerIdInvalidError)")
-    assert not _permanent("mất kết nối giữa chừng: net")
+    assert _permanent("send_file thất bại: ... (ChatWriteForbiddenError)")
+    assert not _permanent("HTTP 429 khi tải")
+    assert not _permanent("mất kết nối giữa chừng")
     assert not _permanent("không kết nối được Telegram: timeout")

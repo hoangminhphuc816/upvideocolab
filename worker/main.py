@@ -16,13 +16,15 @@ log = logging.getLogger("worker")
 
 # Lỗi retry không giúp được — đánh FAILED ngay
 PERMANENT_SUBSTRINGS = (
-    "HTTP 4",
+    "HTTP 400",
+    "HTTP 403",
+    "HTTP 404",
+    "HTTP 410",
     "vượt giới hạn",
     "rỗng",
     "ffprobe",
     "PeerIdInvalid",
     "ChatWriteForbidden",
-    "chat not found",
 )
 
 
