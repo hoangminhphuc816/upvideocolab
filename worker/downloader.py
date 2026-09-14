@@ -32,8 +32,13 @@ def download_to_file(url: str, dest_dir: str, max_bytes: int = TELEGRAM_MAX) -> 
         raise DownloadError(f"HTTP {resp.status_code} khi tải {url}")
 
     declared = resp.headers.get("Content-Length")
-    if declared and int(declared) > max_bytes:
-        raise DownloadError(f"file vượt giới hạn 2GB: {declared} bytes")
+    if declared:
+        try:
+            declared_len = int(declared)
+        except ValueError:
+            raise DownloadError(f"Content-Length không hợp lệ: {declared!r}") from None
+        if declared_len > max_bytes:
+            raise DownloadError(f"file vượt giới hạn 2GB: {declared_len} bytes")
 
     size = 0
     try:
