@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from worker.downloader import download_to_file, validate_video, DownloadError, TELEGRAM_MAX
+from worker.downloader import download_to_file, validate_video, DownloadError, TELEGRAM_MAX, probe_range_support, download_chunk, assemble
 
 
 def fake_response(status=200, chunks=(b"a" * 1024,), content_length=None, iter_raises=False):
@@ -71,3 +71,48 @@ def test_validate_video_corrupt_raises(tmp_path):
         run.return_value = MagicMock(returncode=1, stdout="", stderr="moov atom not found")
         with pytest.raises(DownloadError, match="ffprobe"):
             validate_video(str(f))
+
+
+def test_probe_range_support_true_false():
+    r_ok = MagicMock(); r_ok.status_code = 200; r_ok.headers = {"Accept-Ranges": "bytes"}
+    r_no = MagicMock(); r_no.status_code = 200; r_no.headers = {}
+    with patch("worker.downloader.requests.head", return_value=r_ok):
+        assert probe_range_support("https://x/v.mp4") is True
+    with patch("worker.downloader.requests.head", return_value=r_no):
+        assert probe_range_support("https://x/v.mp4") is False
+
+
+def test_download_chunk_writes_part_file(tmp_path):
+    r = fake_response(chunks=[b"a" * 10, b"b" * 10])
+    r.status_code = 206
+    with patch("worker.downloader.requests.get", return_value=r) as g:
+        path, size = download_chunk("https://x/v.mp4", start=1024, dest_dir=str(tmp_path), chunk_size=20)
+    assert size == 20
+    assert path.endswith("video.part")
+    assert (tmp_path / "video.part").read_bytes() == b"a" * 10 + b"b" * 10
+    headers = g.call_args[1]["headers"]
+    assert headers["Range"] == "bytes=1024-1043"
+
+
+def test_download_chunk_appends(tmp_path):
+    (tmp_path / "video.part").write_bytes(b"abc")
+    r = fake_response(chunks=[b"def"])
+    r.status_code = 206
+    with patch("worker.downloader.requests.get", return_value=r):
+        path, size = download_chunk("https://x/v.mp4", start=3, dest_dir=str(tmp_path), chunk_size=3)
+    assert size == 3
+    assert (tmp_path / "video.part").read_bytes() == b"abcdef"
+
+
+def test_download_chunk_rejects_200_full_body(tmp_path):
+    r = fake_response(chunks=[b"FULL"])
+    r.status_code = 200
+    with patch("worker.downloader.requests.get", return_value=r):
+        with pytest.raises(DownloadError, match="206"):
+            download_chunk("https://x/v.mp4", start=0, dest_dir=str(tmp_path))
+
+
+def test_assemble_renames_part(tmp_path):
+    (tmp_path / "video.part").write_bytes(b"xyz")
+    out = assemble(str(tmp_path))
+    assert out.endswith("video.mp4") and (tmp_path / "video.mp4").exists()

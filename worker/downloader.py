@@ -9,10 +9,52 @@ import requests
 
 # 2GB trừ 1 part 512KB — an toàn biên cho Telegram non-premium
 TELEGRAM_MAX = 2 * 1024**3 - 512 * 1024
+CHUNK_SIZE = 256 * 1024 * 1024  # 256MB/chunk — session ngắn tự nhiên
 
 
 class DownloadError(Exception):
     pass
+
+
+def probe_range_support(url: str) -> bool:
+    try:
+        r = requests.head(url, timeout=(30, 30), allow_redirects=True)
+    except requests.RequestException:
+        return False
+    return r.status_code == 200 and "bytes" in (r.headers.get("Accept-Ranges", "").lower())
+
+
+def download_chunk(url: str, start: int, dest_dir: str, chunk_size: int = CHUNK_SIZE) -> tuple[str, int]:
+    os.makedirs(dest_dir, exist_ok=True)
+    part = Path(dest_dir) / "video.part"
+    end = start + chunk_size - 1
+    try:
+        resp = requests.get(url, stream=True, timeout=(30, 60),
+                            headers={"Range": f"bytes={start}-{end}",
+                                     "User-Agent": "Mozilla/5.0 (video-pipeline)"})
+    except requests.RequestException as e:
+        raise DownloadError(f"không kết nối được nguồn: {e}") from None
+    if resp.status_code != 206:
+        raise DownloadError(f"server không trả 206 cho Range (HTTP {resp.status_code}) — nguồn không hỗ trợ resume")
+    got = 0
+    try:
+        with open(part, "ab") as f:
+            for chunk in resp.iter_content(1024 * 1024):
+                if chunk:
+                    got += len(chunk)
+                    f.write(chunk)
+    except (requests.RequestException, OSError) as e:
+        raise DownloadError(f"mất kết nối giữa chừng (chunk @{start}): {e}") from None
+    if got == 0:
+        raise DownloadError("chunk rỗng")
+    return str(part), got
+
+
+def assemble(dest_dir: str) -> str:
+    part = Path(dest_dir) / "video.part"
+    out = Path(dest_dir) / "video.mp4"
+    part.rename(out)
+    return str(out)
 
 
 def download_to_file(url: str, dest_dir: str, max_bytes: int = TELEGRAM_MAX) -> tuple[str, int]:
