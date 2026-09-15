@@ -57,6 +57,7 @@ async def run_once(cfg: Config) -> int:
         queue.set_status(job.job_id, "DOWNLOADING")
         if probe_range_support(job.url):
             start = checkpoint_dl_bytes(job)
+            entry_checkpoint = start
             retried_reset = False
             while True:
                 try:
@@ -73,7 +74,11 @@ async def run_once(cfg: Config) -> int:
                                 log.exception("không xóa được part khi reset checkpoint: %s", part_path)
                         retried_reset = True
                         start = 0
+                        part = None
                         continue
+                    if start > entry_checkpoint and ("HTTP 416" in msg or "chunk rỗng" in msg):
+                        queue.set_checkpoint(job.job_id, "dl:full")
+                        break
                     raise
                 start += got
                 queue.set_checkpoint(job.job_id, f"dl:{start}")
