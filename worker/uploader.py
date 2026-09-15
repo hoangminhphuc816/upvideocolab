@@ -41,7 +41,7 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
         raise UploadError(f"không kết nối được Telegram: {type(e).__name__}: {e}") from None
 
     try:
-        await client.get_dialogs(limit=1)  # warm entity cache
+        await client.get_dialogs()  # warm entity cache (các dialog của account)
     except Exception:
         pass  # cache warm fail không chặn — send_file sẽ tự resolve
 
