@@ -112,8 +112,8 @@ export TELEGRAM_API_ID=... TELEGRAM_API_HASH=... TARGET_CHANNEL=-100... \
        WORKER_REPO='owner/repo'
 # Trước đó: append 1 hàng PENDING vào Sheet với URL MP4 ~100MB công khai.
 python -m controller.colab_dispatch
-# Kỳ vọng: controller claim job → `colab run` bootstrap → worker tải + upload
-# → video xuất hiện trong kênh; hàng Sheet = DONE + msg_id; tin nhắn ✅.
+# Kỳ vọng: controller peek queue → `colab run` bootstrap → worker TRÊN VM tự
+# claim (verify-after-write) → tải + upload
 # Lần chạy đầu với session mới, worker tự warm entity cache (get_dialogs).
 # Nếu TARGET_CHANNEL sai:
 # - lỗi `PeerIdInvalid` → job FAILED ngay, kiểm tra lại TARGET_CHANNEL + account phải là admin kênh;
@@ -124,9 +124,9 @@ python -m controller.colab_dispatch
 
 1. Append hàng PENDING với URL video 1.5GB.
 2. GitHub → Actions → video-controller → Run workflow → mode `worker`.
-3. Kỳ vọng: controller claim job trên runner (~30s) → cấp Colab VM → job
-   hoàn thành trong ~10–30 phút; video stream được trong kênh (bấm play
-   trực tiếp, không phải tải về mới xem); Sheet DONE.
+3. Kỳ vọng: controller peek queue trên runner (~30s) → cấp Colab VM → worker
+   trên VM tự claim → job hoàn thành trong ~10–30 phút; video stream được
+   trong kênh (bấm play trực tiếp, không phải tải về mới xem); Sheet DONE.
 
 ### c) End-to-end đầy đủ
 
