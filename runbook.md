@@ -176,4 +176,5 @@ python -m controller.colab_dispatch
 - `COLAB_TOKEN_JSON` chỉ tồn tại runner-local (`~/.config/colab-cli/token.json`)
   rồi xoá; không truyền xuống VM.
 - File đúng bội số 256MB → HTTP 416 → worker EOF guard tự assemble; Sheet
-  `checkpoint` dùng `dl:<bytes>` để resume session mới.
+  `checkpoint` dùng `dl:<bytes>`: hữu ích trong-session + chẩn đoán — xuyên-session
+  part file không còn → VM mới mismatch → reset `dl:0` → tải lại từ đầu.
