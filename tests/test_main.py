@@ -32,7 +32,9 @@ def statuses_written(q):
 async def test_run_once_no_job_returns_zero():
     q = MagicMock()
     q.next_job.return_value = None
-    with patch("worker.main.SheetQueue", return_value=q):
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=False), \
+         patch("os.path.exists", return_value=False):
         from worker.main import run_once
         rc = await run_once(make_cfg())
     assert rc == 0
@@ -44,7 +46,9 @@ async def test_run_once_claim_miss_returns_zero_without_processing():
     q.next_job.return_value = make_job()
     q.claim.return_value = False  # worker khác thắng race
     with patch("worker.main.SheetQueue", return_value=q), \
-         patch("worker.main.download_to_file") as dl:
+         patch("worker.main.probe_range_support", return_value=False), \
+         patch("worker.main.download_to_file") as dl, \
+         patch("os.path.exists", return_value=False):
         from worker.main import run_once
         rc = await run_once(make_cfg())
     assert rc == 0
@@ -59,11 +63,13 @@ async def test_run_once_full_success_flow(tmp_path):
     fake = tmp_path / "v.mp4"
     fake.write_bytes(b"")
     with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=False), \
          patch("worker.main.download_to_file", return_value=(str(fake), 1024)), \
          patch("worker.main.validate_video"), \
          patch("worker.main.upload_to_channel", AsyncMock(return_value=777)), \
          patch("worker.main.notify_done") as nd, \
-         patch("worker.main.notify_failed") as nf:
+         patch("worker.main.notify_failed") as nf, \
+         patch("os.path.exists", return_value=True):
         from worker.main import run_once
         rc = await run_once(make_cfg())
     assert rc == 0
@@ -80,10 +86,12 @@ async def test_run_once_permanent_error_marks_failed_and_notifies():
     q.next_job.return_value = make_job()
     q.claim.return_value = True
     with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=False), \
          patch("worker.main.download_to_file",
                side_effect=DownloadError("HTTP 404 khi tải")), \
          patch("worker.main.notify_done") as nd, \
-         patch("worker.main.notify_failed") as nf:
+         patch("worker.main.notify_failed") as nf, \
+         patch("os.path.exists", return_value=False):
         from worker.main import run_once
         rc = await run_once(make_cfg())
     assert rc == 2
@@ -99,9 +107,11 @@ async def test_run_once_permanent_notify_failed_swallowed_keeps_rc2():
     q.next_job.return_value = make_job()
     q.claim.return_value = True
     with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=False), \
          patch("worker.main.download_to_file",
                side_effect=DownloadError("HTTP 404 khi tải")), \
-         patch("worker.main.notify_failed", side_effect=NotifyError("bot API lỗi")):
+         patch("worker.main.notify_failed", side_effect=NotifyError("bot API lỗi")), \
+         patch("os.path.exists", return_value=False):
         from worker.main import run_once
         rc = await run_once(make_cfg())
     assert rc == 2
@@ -114,10 +124,12 @@ async def test_run_once_transient_error_reraises_without_failed():
     q.next_job.return_value = make_job()
     q.claim.return_value = True
     with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=False), \
          patch("worker.main.download_to_file",
                side_effect=DownloadError("mất kết nối giữa chừng: net")), \
          patch("worker.main.notify_done"), \
-         patch("worker.main.notify_failed") as nf:
+         patch("worker.main.notify_failed") as nf, \
+         patch("os.path.exists", return_value=False):
         from worker.main import run_once
         with pytest.raises(DownloadError, match="mất kết nối"):
             await run_once(make_cfg())
@@ -134,10 +146,12 @@ async def test_run_once_notify_failure_does_not_break_success(tmp_path):
     fake = tmp_path / "v.mp4"
     fake.write_bytes(b"")
     with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=False), \
          patch("worker.main.download_to_file", return_value=(str(fake), 1024)), \
          patch("worker.main.validate_video"), \
          patch("worker.main.upload_to_channel", AsyncMock(return_value=777)), \
-         patch("worker.main.notify_done", side_effect=NotifyError("bot API lỗi")):
+         patch("worker.main.notify_done", side_effect=NotifyError("bot API lỗi")), \
+         patch("os.path.exists", return_value=True):
         from worker.main import run_once
         rc = await run_once(make_cfg())
     assert rc == 0  # notify là best-effort, không phá DONE
@@ -169,3 +183,92 @@ def test_permanent_substrings():
     assert not _permanent("HTTP 429 khi tải")
     assert not _permanent("mất kết nối giữa chừng")
     assert not _permanent("không kết nối được Telegram: timeout")
+
+
+@pytest.mark.asyncio
+async def test_run_once_chunked_resume_flow(tmp_path):
+    q = MagicMock()
+    row = make_job()
+    row.checkpoint = "dl:100"
+    q.next_job.return_value = row
+    q.claim.return_value = True
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=True), \
+         patch("worker.main.download_chunk", return_value=("/tmp/p.part", 50)) as dc, \
+         patch("worker.main.checkpoint_dl_bytes", return_value=100), \
+         patch("worker.main.assemble", return_value="/tmp/video.mp4"), \
+         patch("worker.main.validate_video"), \
+         patch("worker.main.upload_to_channel", AsyncMock(return_value=777)), \
+         patch("worker.main.notify_done"), \
+         patch("worker.main.notify_failed"), \
+         patch("os.path.exists", return_value=True):
+        from worker.main import run_once
+        rc = await run_once(make_cfg())
+    assert rc == 0
+    dc.assert_called_once()
+    assert dc.call_args[1]["start"] == 100
+    q.set_checkpoint.assert_called_with("JOB-1", "dl:150")
+
+
+@pytest.mark.asyncio
+async def test_run_once_no_range_fallback_full_download(tmp_path):
+    q = MagicMock()
+    q.next_job.return_value = make_job()
+    q.claim.return_value = True
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=False), \
+         patch("worker.main.download_to_file", return_value=("/tmp/v.mp4", 10)) as dl, \
+         patch("worker.main.download_chunk") as dc, \
+         patch("worker.main.validate_video"), \
+         patch("worker.main.upload_to_channel", AsyncMock(return_value=1)), \
+         patch("worker.main.notify_done"), \
+         patch("worker.main.notify_failed"), \
+         patch("os.path.exists", return_value=True):
+        from worker.main import run_once
+        rc = await run_once(make_cfg())
+    assert rc == 0
+    dl.assert_called_once()
+    dc.assert_not_called()
+    q.set_checkpoint.assert_called_with("JOB-1", "dl:full")
+
+
+@pytest.mark.asyncio
+async def test_run_once_upload_dead_resets_checkpoint(tmp_path):
+    from worker.uploader import UploadError
+    q = MagicMock()
+    row = make_job()
+    q.next_job.return_value = row
+    q.claim.return_value = True
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=True), \
+         patch("worker.main.download_chunk", side_effect=[("/tmp/p.part", 100), ("/tmp/p.part", 0)]), \
+         patch("worker.main.checkpoint_dl_bytes", side_effect=[0, 100]), \
+         patch("worker.main.assemble", return_value="/tmp/video.mp4"), \
+         patch("worker.main.validate_video"), \
+         patch("worker.main.upload_to_channel", AsyncMock(side_effect=UploadError("send_file thất bại: TimeoutError"))), \
+         patch("worker.main.notify_failed") as nf, \
+         patch("worker.main.os.path.getsize", return_value=100), \
+         patch("os.path.exists", return_value=True):
+        from worker.main import run_once
+        with pytest.raises(UploadError):
+            await run_once(make_cfg())
+    calls = [c.args for c in q.set_checkpoint.call_args_list]
+    assert calls[-1][1] == "dl:full"
+
+
+@pytest.mark.asyncio
+async def test_run_once_download_chunk_transient_reraises(tmp_path):
+    q = MagicMock()
+    q.next_job.return_value = make_job()
+    q.claim.return_value = True
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.probe_range_support", return_value=True), \
+         patch("worker.main.download_chunk", side_effect=DownloadError("mất kết nối giữa chừng (chunk @0)")), \
+         patch("worker.main.notify_done"), \
+         patch("worker.main.notify_failed") as nf, \
+         patch("os.path.exists", return_value=False):
+        from worker.main import run_once
+        with pytest.raises(DownloadError, match="mất kết nối"):
+            await run_once(make_cfg())
+    assert "FAILED" not in statuses_written(q)
+    nf.assert_not_called()
