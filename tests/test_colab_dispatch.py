@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from worker.config import Config
-from controller.colab_dispatch import dispatch_to_colab, build_env_args
+from controller.colab_dispatch import _write_bootstrap, dispatch_to_colab
 
 
 def make_cfg():
@@ -27,29 +27,31 @@ WORKER_ENV = {
 }
 
 
-def test_build_env_args_includes_worker_id_and_not_token_json():
-    args = build_env_args(WORKER_ENV, worker_id="colab-abc123")
-    envs = [a for a in args if a.startswith("--env ")]
-    joined = " ".join(envs)
-    assert "WORKER_ID=colab-abc123" in joined
-    assert "COLAB_TOKEN_JSON" not in joined
-    assert "TELETHON_SESSION=sess" in joined
+def test_write_bootstrap_includes_env_worker_id_and_repo_excludes_token(monkeypatch):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
+    assert "os.environ.update(json.loads(" in src
+    assert '"WORKER_ID": "colab-abc123"' in src
+    assert "https://github.com/owner/repo.git" in src
+    assert "COLAB_TOKEN_JSON" not in src
+    assert "from worker.main import main as worker_main" in src
 
 
 def test_dispatch_no_job_returns_zero_without_colab(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    monkeypatch.delenv("HOME", raising=False)
     q = MagicMock()
     q.next_job.return_value = None
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
-         patch("controller.colab_dispatch.subprocess.run") as run:
+         patch("controller.colab_dispatch.subprocess.run") as run, \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
     assert rc == 0
     run.assert_not_called()
 
 
 def test_dispatch_claims_then_runs_colab(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    token_path = tmp_path / ".config" / "colab-cli" / "token.json"
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
     q = MagicMock()
     job = MagicMock(job_id="JOB-1", status="PENDING", url="https://x/v.mp4")
     q.next_job.return_value = job
@@ -57,26 +59,28 @@ def test_dispatch_claims_then_runs_colab(tmp_path, monkeypatch):
     run = MagicMock(return_value=MagicMock(returncode=0))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run", run) as run_mock, \
-         patch("controller.colab_dispatch.TOKEN_PATH", token_path):
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
     assert rc == 0
     cmd = run_mock.call_args[0][0]
-    assert "colab" in cmd[0] or "colab" in " ".join(cmd[:3])
+    assert cmd[:2] == ["colab", "run"]
     assert "--timeout" in cmd and "3600" in cmd
-    assert "worker.py" in cmd[-1]
+    bootstrap = cmd[cmd.index("--timeout") + 2]
+    assert bootstrap.endswith(".py")
     token = tmp_path / ".config" / "colab-cli" / "token.json"
     assert token.exists() and token.read_text() == "{tok}"
 
 
-def test_dispatch_nonzero_exit_maps_transient(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    token_path = tmp_path / ".config" / "colab-cli" / "token.json"
+def test_dispatch_nonzero_exit_maps_transient_and_preserves_code(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
     q = MagicMock()
     q.next_job.return_value = MagicMock(job_id="JOB-1", status="PENDING", url="u")
     q.claim.return_value = True
-    run = MagicMock(return_value=MagicMock(returncode=1))
+    run = MagicMock(return_value=MagicMock(returncode=2))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run", run), \
-         patch("controller.colab_dispatch.TOKEN_PATH", token_path):
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
-    assert rc == 1
+    assert rc == 2
+    token = tmp_path / ".config" / "colab-cli" / "token.json"
+    assert token.exists() and token.read_text() == "{tok}"
