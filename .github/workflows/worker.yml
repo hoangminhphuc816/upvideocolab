@@ -1,4 +1,4 @@
-name: video-worker
+name: video-controller
 
 on:
   repository_dispatch:
@@ -26,53 +26,55 @@ jobs:
       github.event_name == 'repository_dispatch' ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'worker')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
+      COLAB_TOKEN_JSON: ${{ secrets.COLAB_TOKEN_JSON }}
+      GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
+      SHEET_ID: ${{ secrets.SHEET_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
       TELETHON_SESSION: ${{ secrets.TELETHON_SESSION }}
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
       TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
       TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
-      OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
-      GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
-      SHEET_ID: ${{ secrets.SHEET_ID }}
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Cài ffprobe
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - name: Cài dependencies
-        run: pip install -r requirements.txt
-      - name: Chạy worker (1 job)
-        run: python -m worker.main
+      - name: Cài dependencies + Colab CLI
+        run: |
+          pip install -r requirements.txt
+          pip install google-colab-cli
+      - name: Dispatch job lên Colab VM (worker chạy trên VM)
+        run: python -m controller.colab_dispatch
 
   sweep:
     if: >-
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'sweep')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
+      COLAB_TOKEN_JSON: ${{ secrets.COLAB_TOKEN_JSON }}
+      GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
+      SHEET_ID: ${{ secrets.SHEET_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
       TELETHON_SESSION: ${{ secrets.TELETHON_SESSION }}
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
       TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
       TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
-      OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
-      GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
-      SHEET_ID: ${{ secrets.SHEET_ID }}
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Cài ffprobe
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - name: Cài dependencies
-        run: pip install -r requirements.txt
-      - name: Sweep job treo
+      - name: Cài dependencies + Colab CLI
+        run: |
+          pip install -r requirements.txt
+          pip install google-colab-cli
+      - name: Sweep job treo (trên runner — chỉ Sheet + notify)
         run: python -m worker.main --sweep
-      - name: Xử lý job PENDING/RETRY còn lại (watchdog)
-        run: python -m worker.main
+      - name: Xử lý job PENDING/RETRY còn lại (watchdog → Colab VM)
+        run: python -m controller.colab_dispatch
