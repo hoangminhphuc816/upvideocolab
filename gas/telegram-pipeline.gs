@@ -23,8 +23,8 @@ function pipelineCreateJobAndDispatch(mp4Url, chatId) {
   var jobId = 'JOB-' + Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss')
       + '-' + Math.random().toString(36).slice(2, 8);
   // Thứ tự cột PHẢI khớp COLUMNS của worker/sheet_queue.py:
-  // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id, error, retry_count
-  sheet.appendRow([jobId, 'PENDING', mp4Url, String(chatId), String(now), '', '', '', '', '0']);
+  // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id, error, retry_count, checkpoint
+  sheet.appendRow([jobId, 'PENDING', mp4Url, String(chatId), String(now), '', '', '', '', '0', '0']);
   dispatchToGitHub(jobId);
   return jobId;
 }

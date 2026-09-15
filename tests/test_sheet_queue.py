@@ -9,7 +9,7 @@ from worker.config import Config
 from worker.sheet_queue import SheetQueue, Job, COLUMNS
 
 # COLUMNS (đúng thứ tự): job_id, status, url, chat_id, created_at, updated_at,
-#                        worker, msg_id, error, retry_count
+#                        worker, msg_id, error, retry_count, checkpoint
 HDR = list(COLUMNS)
 
 
@@ -55,9 +55,9 @@ def q_with(rows, now_ts=None):
 
 def test_next_job_returns_oldest_pending():
     rows = [HDR,
-            ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0"],
-            ["JOB-2", "PENDING", "u2", "42", "50", "", "", "", "", "0"],
-            ["JOB-3", "DONE", "u3", "42", "300", "301", "w", "9", "", "0"]]
+            ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"],
+            ["JOB-2", "PENDING", "u2", "42", "50", "", "", "", "", "0", "0"],
+            ["JOB-3", "DONE", "u3", "42", "300", "301", "w", "9", "", "0", "0"]]
     q = q_with(rows)
     job = q.next_job()
     assert isinstance(job, Job)
@@ -68,8 +68,8 @@ def test_next_job_returns_oldest_pending():
 
 def test_next_job_retry_priority_over_pending():
     rows = [HDR,
-            ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0"],
-            ["JOB-2", "RETRY", "u2", "42", "200", "", "", "", "", "1"]]
+            ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"],
+            ["JOB-2", "RETRY", "u2", "42", "200", "", "", "", "", "1", "0"]]
     q = q_with(rows)
     job = q.next_job()
     assert job.job_id == "JOB-2"
@@ -81,7 +81,7 @@ def test_next_job_none_when_queue_empty():
 
 
 def test_claim_success_writes_and_wins():
-    rows = [HDR, ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0"]]
+    rows = [HDR, ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"]]
     q = q_with(rows, now_ts=500)
     assert q.claim("JOB-1", "worker-a") is True
     row = q.sheet.rows[1]
@@ -91,7 +91,7 @@ def test_claim_success_writes_and_wins():
 
 
 def test_claim_loses_when_rival_writes_last():
-    rows = [HDR, ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0"]]
+    rows = [HDR, ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"]]
     q = q_with(rows, now_ts=500)
     orig = q.sheet.update_cell
 
@@ -106,7 +106,7 @@ def test_claim_loses_when_rival_writes_last():
 
 
 def test_set_status_and_record_message_id():
-    rows = [HDR, ["JOB-1", "UPLOADING", "u1", "42", "100", "101", "w", "", "", "0"]]
+    rows = [HDR, ["JOB-1", "UPLOADING", "u1", "42", "100", "101", "w", "", "", "0", "0"]]
     q = q_with(rows, now_ts=600)
     q.set_status("JOB-1", "DONE")
     q.record_message_id("JOB-1", 555)
@@ -118,7 +118,7 @@ def test_set_status_and_record_message_id():
 
 
 def test_set_status_rejects_unknown_status():
-    rows = [HDR, ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0"]]
+    rows = [HDR, ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"]]
     q = q_with(rows)
     try:
         q.set_status("JOB-1", "BOGUS")
@@ -130,10 +130,10 @@ def test_set_status_rejects_unknown_status():
 def test_sweep_stale_retries_then_fails_and_reports():
     # now = 2000; cutoff = 2000 - 15*60 = 1100
     rows = [HDR,
-            ["JOB-OLD", "PENDING", "u1", "42", "100", "115", "w", "", "", "0"],
-            ["JOB-NEW", "PENDING", "u2", "42", "9999", "", "", "", "", "0"],
-            ["JOB-MAX", "CLAIMED", "u3", "42", "100", "115", "w", "", "", "3"],
-            ["JOB-DL", "DOWNLOADING", "u4", "42", "100", "100", "w", "", "", "1"]]
+            ["JOB-OLD", "PENDING", "u1", "42", "100", "115", "w", "", "", "0", "0"],
+            ["JOB-NEW", "PENDING", "u2", "42", "9999", "", "", "", "", "0", "0"],
+            ["JOB-MAX", "CLAIMED", "u3", "42", "100", "115", "w", "", "", "3", "0"],
+            ["JOB-DL", "DOWNLOADING", "u4", "42", "100", "100", "w", "", "", "1", "0"]]
     q = q_with(rows, now_ts=2000)
     failed = q.sweep_stale(older_than_min=15, max_retries=3)
     # JOB-OLD: stale, retries 0 < 3 → RETRY; JOB-NEW: mới → giữ nguyên
@@ -149,14 +149,14 @@ def test_sweep_stale_retries_then_fails_and_reports():
 
 def test_sweep_ignores_terminal_states():
     rows = [HDR,
-            ["JOB-D", "DONE", "u1", "42", "1", "1", "w", "9", "", "0"],
-            ["JOB-F", "FAILED", "u2", "42", "1", "1", "w", "", "x", "3"]]
+            ["JOB-D", "DONE", "u1", "42", "1", "1", "w", "9", "", "0", "0"],
+            ["JOB-F", "FAILED", "u2", "42", "1", "1", "w", "", "x", "3", "0"]]
     q = q_with(rows, now_ts=99999)
     assert q.sweep_stale() == []
 
 
 def test_sweep_uses_created_at_when_updated_at_empty():
-    rows = [HDR, ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0"]]
+    rows = [HDR, ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"]]
     q = q_with(rows, now_ts=100 + 16 * 60)
     failed = q.sweep_stale(older_than_min=15)
     assert q.sheet.rows[1][1] == "RETRY"
@@ -173,3 +173,31 @@ def test_append_job_creates_pending_row():
     assert row[2] == "https://x/v.mp4"
     assert row[3] == "42"
     assert row[4] == "1234"
+    assert row[10] == "0"
+
+
+def test_checkpoint_column_appended():
+    from worker.sheet_queue import COLUMNS
+    assert COLUMNS[-1] == "checkpoint"
+    assert len(COLUMNS) == 11
+
+
+def test_checkpoint_parse_roundtrip():
+    rows = [HDR + ["checkpoint"],
+            ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"]]
+    q = q_with(rows)
+    q.set_checkpoint("JOB-1", "dl:268435456")
+    row = q.sheet.rows[1]
+    assert row[10] == "dl:268435456"
+    from worker.sheet_queue import checkpoint_dl_bytes, Job
+    job = q._parse_row(2, row)
+    assert isinstance(job, Job)
+    assert checkpoint_dl_bytes(job) == 268435456
+
+
+def test_checkpoint_invalid_returns_zero():
+    from worker.sheet_queue import checkpoint_dl_bytes
+    job = Job("J", "PENDING", "u", 42, 1, None, "", None, "", 0, "rubbish", 2)
+    assert checkpoint_dl_bytes(job) == 0
+    job2 = Job("J", "PENDING", "u", 42, 1, None, "", None, "", 0, "0", 2)
+    assert checkpoint_dl_bytes(job2) == 0

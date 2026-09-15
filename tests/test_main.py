@@ -20,7 +20,7 @@ def make_job():
     return Job(
         job_id="JOB-1", status="PENDING", url="https://x/v.mp4", chat_id=42,
         created_at=1, updated_at=None, worker="", msg_id=None, error="",
-        retry_count=0, row_index=2,
+        retry_count=0, checkpoint="0", row_index=2,
     )
 
 

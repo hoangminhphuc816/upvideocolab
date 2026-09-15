@@ -12,7 +12,7 @@ import gspread
 from worker.config import Config
 
 COLUMNS = ["job_id", "status", "url", "chat_id", "created_at", "updated_at",
-           "worker", "msg_id", "error", "retry_count"]
+           "worker", "msg_id", "error", "retry_count", "checkpoint"]
 STATUSES = ["PENDING", "CLAIMED", "DOWNLOADING", "UPLOADING", "DONE", "FAILED", "RETRY"]
 SWEEPABLE = ("PENDING", "CLAIMED", "DOWNLOADING", "UPLOADING")
 
@@ -29,6 +29,7 @@ class Job:
     msg_id: int | None
     error: str
     retry_count: int
+    checkpoint: str
     row_index: int  # 1-based, tính cả dòng header
 
 
@@ -73,7 +74,7 @@ class SheetQueue:
     def append_job(self, url: str, chat_id: int, job_id: str | None = None) -> str:
         job_id = job_id or self.new_job_id()
         row = [job_id, "PENDING", url, str(chat_id), str(self._now_ts()),
-               "", "", "", "", "0"]
+               "", "", "", "", "0", "0"]
         self.sheet.append_row(row)
         return job_id
 
@@ -113,6 +114,7 @@ class SheetQueue:
             msg_id=msg_id or None,
             error=cell("error"),
             retry_count=self._to_int(cell("retry_count")),
+            checkpoint=cell("checkpoint") or "0",
             row_index=i,
         )
 
@@ -143,6 +145,11 @@ class SheetQueue:
         if row is not None:
             self.sheet.update_cell(row, self._col["msg_id"], str(msg_id))
 
+    def set_checkpoint(self, job_id: str, value: str) -> None:
+        row = self._row_by_job_id(job_id)
+        if row is not None:
+            self.sheet.update_cell(row, self._col["checkpoint"], value)
+
     def sweep_stale(self, older_than_min: int = 15, max_retries: int = 3) -> list[str]:
         """Job non-terminal quá cũ → RETRY (tăng retry_count) hoặc FAILED.
 
@@ -170,3 +177,13 @@ class SheetQueue:
                 self.set_status(job_id, "RETRY")
                 self.sheet.update_cell(i, self._col["retry_count"], str(retries + 1))
         return newly_failed
+
+
+def checkpoint_dl_bytes(job: Job) -> int:
+    raw = (job.checkpoint or "").strip()
+    if not raw.startswith("dl:"):
+        return 0
+    try:
+        return max(0, int(raw[3:]))
+    except ValueError:
+        return 0
