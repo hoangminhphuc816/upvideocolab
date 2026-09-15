@@ -1,4 +1,4 @@
-"""Controller: claim job từ Sheet, cấp Colab VM qua colab run, map exit code.
+"""Controller: peek queue, cấp Colab VM qua colab run, map exit code.
 
 Exit-code semantics:
 - 0: no job or job processed thành công trên VM.
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ from worker.config import Config
 from worker.sheet_queue import SheetQueue
 
 TOKEN_PATH = Path.home() / ".config" / "colab-cli" / "token.json"
+HISTORY_DIR = Path.home() / ".config" / "colab-cli" / "history"
 # Timeout kernel im lặng của colab run — iopub liên tục sẽ reset; 1h an toàn
 COLAB_RUN_TIMEOUT_S = "3600"
 
@@ -64,12 +66,8 @@ def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json:
     job = queue.next_job()
     if job is None:
         return 0
-    worker_id = os.environ.get("GITHUB_RUN_ID", "local")
-    worker_id = f"colab-{worker_id}"
-    if not queue.claim(job.job_id, worker_id):
-        return 0
 
-    bootstrap = _write_bootstrap(worker_env, worker_id)
+    bootstrap = _write_bootstrap(worker_env, os.environ.get("WORKER_ID", os.environ.get("GITHUB_RUN_ID", "local")))
     fd, path = tempfile.mkstemp(suffix=".py", prefix="colab-bootstrap-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -82,6 +80,7 @@ def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json:
             Path(path).unlink()
         except FileNotFoundError:
             pass
+        shutil.rmtree(HISTORY_DIR, ignore_errors=True)
 
 
 def main() -> int:

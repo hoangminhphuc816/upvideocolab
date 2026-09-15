@@ -21,7 +21,7 @@ PERMANENT_SUBSTRINGS = (
     "HTTP 404",
     "HTTP 410",
     "vượt giới hạn",
-    "rỗng",
+    "file rỗng",
     "ffprobe",
     "PeerIdInvalid",
     "ChatWriteForbidden",
@@ -46,7 +46,7 @@ async def run_once(cfg: Config) -> int:
         log.info("không có job — thoát")
         return 0
 
-    worker_id = "worker-" + os.environ.get("GITHUB_RUN_ID", "local")
+    worker_id = os.environ.get("WORKER_ID", "worker-" + os.environ.get("GITHUB_RUN_ID", "local"))
     if not queue.claim(job.job_id, worker_id):
         log.warning("claim %s thất bại — worker khác đã lấy", job.job_id)
         return 0

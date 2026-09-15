@@ -13,7 +13,7 @@ qua Telethon (MTProto, 2GB/file); GitHub Actions chỉ làm controller/watchdog
                                             │ POST repository_dispatch (PAT)
                                             ▼
                               GitHub Actions controller (public repo, $0)
-                                            │ claim job (verify-after-write)
+                                            │ peek queue (worker trên VM tự claim verify-after-write)
                                             │ cấp Colab VM qua colab run bootstrap
                                             ▼
                                    Colab VM worker (ephemeral)
@@ -24,7 +24,7 @@ qua Telethon (MTProto, 2GB/file); GitHub Actions chỉ làm controller/watchdog
                                             ▼
                               Controller notify → Bot thông báo ✅/❌
     Cron 2h/lần (Actions sweep): job treo → RETRY ×3 → FAILED + ❌
-    Chunk checkpoint resume: session chết → VM mới đọc checkpoint → tiếp tục.
+    Chunk checkpoint resume: session chết → part không còn → reset `dl:0` → tải lại từ đầu.
 
 ## Thành phần
 
@@ -35,7 +35,7 @@ qua Telethon (MTProto, 2GB/file); GitHub Actions chỉ làm controller/watchdog
 | `worker/downloader.py` | Chunked streaming download + Range probe + checkpoint hook |
 | `worker/uploader.py` | Telethon MTProto upload, StringSession |
 | `worker/notifier.py` | Bot API sendMessage kết quả |
-| `controller/colab_dispatch.py` | Controller: claim job → materialize token → `colab run` bootstrap → exit map |
+| `controller/colab_dispatch.py` | Controller: peek queue → `colab run` bootstrap → exit map |
 | `.github/workflows/worker.yml` | Controller workflow: repository_dispatch + cron sweep + workflow_dispatch |
 | `gas/telegram-pipeline.gs` | GAS webhook: resolve URL, append PENDING, dispatch |
 | `tools/make_session.py` | Tạo StringSession local 1 lần |
