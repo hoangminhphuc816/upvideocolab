@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
+      WORKER_REPO: ${{ vars.WORKER_REPO }}
       COLAB_TOKEN_JSON: ${{ secrets.COLAB_TOKEN_JSON }}
       GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
       SHEET_ID: ${{ secrets.SHEET_ID }}
@@ -56,6 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
+      WORKER_REPO: ${{ vars.WORKER_REPO }}
       COLAB_TOKEN_JSON: ${{ secrets.COLAB_TOKEN_JSON }}
       GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
       SHEET_ID: ${{ secrets.SHEET_ID }}

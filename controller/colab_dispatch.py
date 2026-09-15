@@ -46,9 +46,9 @@ def _write_bootstrap(worker_env: dict[str, str], worker_id: str) -> str:
     }
     return f"""\
 import json, os, subprocess, sys
-os.environ.update(json.loads({json.dumps(payload)}))
+os.environ.update(json.loads({json.dumps(json.dumps(payload))}))
 subprocess.run([sys.executable, "-m", "pip", "install", "-q",
-    "gspread", "telethon==1.45.0", "cryptg", "requests"], check=True)
+    "gspread>=6.0,<7", "telethon==1.45.0", "cryptg", "requests"], check=True)
 subprocess.run(["git", "clone", "--depth", "1",
     "https://github.com/{repo}.git", "/content/app"], check=True)
 sys.path.insert(0, "/content/app")

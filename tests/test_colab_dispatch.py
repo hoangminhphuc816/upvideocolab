@@ -31,10 +31,18 @@ def test_write_bootstrap_includes_env_worker_id_and_repo_excludes_token(monkeypa
     monkeypatch.setenv("WORKER_REPO", "owner/repo")
     src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
     assert "os.environ.update(json.loads(" in src
-    assert '"WORKER_ID": "colab-abc123"' in src
     assert "https://github.com/owner/repo.git" in src
     assert "COLAB_TOKEN_JSON" not in src
     assert "from worker.main import main as worker_main" in src
+    assert "gspread>=6.0,<7" in src
+    snippet = src.splitlines()[1]
+    ns = {"os": __import__("os"), "json": __import__("json"),
+          "subprocess": MagicMock(), "sys": __import__("sys")}
+    exec(snippet, ns)
+    env = ns["os"].environ
+    assert env["TELETHON_SESSION"] == "sess"
+    assert env["WORKER_ID"] == "colab-abc123"
+    assert "COLAB_TOKEN_JSON" not in env
 
 
 def test_dispatch_no_job_returns_zero_without_colab(tmp_path, monkeypatch):
