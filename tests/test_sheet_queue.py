@@ -183,7 +183,7 @@ def test_checkpoint_column_appended():
 
 
 def test_checkpoint_parse_roundtrip():
-    rows = [HDR + ["checkpoint"],
+    rows = [HDR,
             ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"]]
     q = q_with(rows)
     q.set_checkpoint("JOB-1", "dl:268435456")

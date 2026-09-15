@@ -100,7 +100,8 @@ class SheetQueue:
 
     def _parse_row(self, i: int, row: list[str]) -> Job:
         def cell(name: str) -> str:
-            return row[self._col[name] - 1]
+            idx = self._col[name] - 1
+            return row[idx] if idx < len(row) else ""
 
         msg_id = self._to_int(cell("msg_id"))
         return Job(
