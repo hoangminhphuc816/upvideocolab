@@ -2,6 +2,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from worker.downloader import download_to_file, validate_video, DownloadError, TELEGRAM_MAX, probe_range_support, download_chunk, assemble
 
@@ -86,12 +87,12 @@ def test_download_chunk_writes_part_file(tmp_path):
     r = fake_response(chunks=[b"a" * 10, b"b" * 10])
     r.status_code = 206
     with patch("worker.downloader.requests.get", return_value=r) as g:
-        path, size = download_chunk("https://x/v.mp4", start=1024, dest_dir=str(tmp_path), chunk_size=20)
+        path, size = download_chunk("https://x/v.mp4", start=0, dest_dir=str(tmp_path), chunk_size=20)
     assert size == 20
     assert path.endswith("video.part")
     assert (tmp_path / "video.part").read_bytes() == b"a" * 10 + b"b" * 10
     headers = g.call_args[1]["headers"]
-    assert headers["Range"] == "bytes=1024-1043"
+    assert headers["Range"] == "bytes=0-19"
 
 
 def test_download_chunk_appends(tmp_path):
@@ -110,9 +111,46 @@ def test_download_chunk_rejects_200_full_body(tmp_path):
     with patch("worker.downloader.requests.get", return_value=r):
         with pytest.raises(DownloadError, match="206"):
             download_chunk("https://x/v.mp4", start=0, dest_dir=str(tmp_path))
+    assert not (tmp_path / "video.part").exists()
 
 
 def test_assemble_renames_part(tmp_path):
     (tmp_path / "video.part").write_bytes(b"xyz")
     out = assemble(str(tmp_path))
     assert out.endswith("video.mp4") and (tmp_path / "video.mp4").exists()
+
+
+def test_download_chunk_stream_error_raises(tmp_path):
+    r = fake_response(chunks=[b"a"], iter_raises=True)
+    r.status_code = 206
+    with patch("worker.downloader.requests.get", return_value=r):
+        with pytest.raises(DownloadError, match="mất kết nối"):
+            download_chunk("https://x/v.mp4", start=0, dest_dir=str(tmp_path))
+
+
+def test_probe_range_support_non_200_is_false():
+    r = MagicMock(); r.status_code = 404; r.headers = {}
+    with patch("worker.downloader.requests.head", return_value=r):
+        assert probe_range_support("https://x/v.mp4") is False
+
+
+def test_probe_range_support_request_exception_is_false():
+    with patch("worker.downloader.requests.head", side_effect=requests.RequestException("boom")):
+        assert probe_range_support("https://x/v.mp4") is False
+
+
+def test_download_chunk_part_checkpoint_mismatch_raises(tmp_path):
+    (tmp_path / "video.part").write_bytes(b"abc")
+    with patch("worker.downloader.requests.get", return_value=fake_response(chunks=[b"x"])) as g:
+        with pytest.raises(DownloadError, match="checkpo"):
+            download_chunk("https://x/v.mp4", start=100, dest_dir=str(tmp_path))
+    g.assert_not_called()
+
+
+def test_download_chunk_telegram_max_guard_raises(tmp_path):
+    oversized = b"x" * (TELEGRAM_MAX + 10)
+    r = fake_response(chunks=[oversized])
+    r.status_code = 206
+    with patch("worker.downloader.requests.get", return_value=r):
+        with pytest.raises(DownloadError, match="vượt giới hạn"):
+            download_chunk("https://x/v.mp4", start=0, dest_dir=str(tmp_path), chunk_size=TELEGRAM_MAX + 10)

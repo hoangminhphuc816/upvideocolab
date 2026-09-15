@@ -27,6 +27,9 @@ def probe_range_support(url: str) -> bool:
 def download_chunk(url: str, start: int, dest_dir: str, chunk_size: int = CHUNK_SIZE) -> tuple[str, int]:
     os.makedirs(dest_dir, exist_ok=True)
     part = Path(dest_dir) / "video.part"
+    actual = part.stat().st_size if part.exists() else 0
+    if actual != start:
+        raise DownloadError(f"part file {actual} bytes != checkpoint {start} — cần reset checkpoint")
     end = start + chunk_size - 1
     try:
         resp = requests.get(url, stream=True, timeout=(30, 60),
@@ -42,6 +45,8 @@ def download_chunk(url: str, start: int, dest_dir: str, chunk_size: int = CHUNK_
             for chunk in resp.iter_content(1024 * 1024):
                 if chunk:
                     got += len(chunk)
+                    if start + got > TELEGRAM_MAX:
+                        raise DownloadError(f"file vượt giới hạn 2GB: {start + got} bytes")
                     f.write(chunk)
     except (requests.RequestException, OSError) as e:
         raise DownloadError(f"mất kết nối giữa chừng (chunk @{start}): {e}") from None
@@ -53,7 +58,10 @@ def download_chunk(url: str, start: int, dest_dir: str, chunk_size: int = CHUNK_
 def assemble(dest_dir: str) -> str:
     part = Path(dest_dir) / "video.part"
     out = Path(dest_dir) / "video.mp4"
-    part.rename(out)
+    try:
+        part.rename(out)
+    except OSError as e:
+        raise DownloadError(f"assemble thất bại: {e}") from None
     return str(out)
 
 
