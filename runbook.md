@@ -106,10 +106,9 @@
 > (controller) + `google-colab-cli`.
 
 ```bash
-export TELEGRAM_API_ID=... TELEGRAM_API_HASH=... TARGET_CHANNEL=-100... \
-       OWNER_CHAT_ID=... GCP_SA_JSON='...' SHEET_ID=... BOT_TOKEN=... \
-       TELETHON_SESSION=... DL_DIR=/tmp COLAB_TOKEN_JSON='...' \
-       WORKER_REPO='owner/repo'
+# Điền .env từ template: cp .env.example .env (biến liệt kê đầy đủ kèm hướng dẫn từng biến)
+# rồi nạp vào shell trước khi chạy:
+set -a; source .env; set +a
 # Trước đó: append 1 hàng PENDING vào Sheet với URL MP4 ~100MB công khai.
 python -m controller.colab_dispatch
 # Kỳ vọng: controller peek queue → `colab run` bootstrap → worker TRÊN VM tự
