@@ -81,8 +81,9 @@
 4. Lưu ý: workflow `schedule` tự tắt nếu repo không hoạt động 60 ngày —
    thỉnh thoảng push commit hoặc chấp nhận bật lại tay.
 5. Lưu ý pipeline secrets: các secret chỉ tồn tại trong môi trường runner
-   ~30 giây, sau đó controller bootstrap truyền env cần thiết xuống Colab VM
-   qua `colab run --env`. Riêng `COLAB_TOKEN_JSON` **không** được truyền
+   ~30 giây, sau đó controller bootstrap truyền env xuống VM qua prelude
+   `os.environ` trong `colab_bootstrap.py` (session ephemeral, tự teardown).
+   Riêng `COLAB_TOKEN_JSON` **không** được truyền
    xuống VM; controller chỉ dùng nội dung JSON để materialize runner-local
    `~/.config/colab-cli/token.json` rồi chạy `colab run`.
 
@@ -100,10 +101,9 @@
 
 ### a) Smoke 100MB qua local controller
 
-> Yêu cầu local: `pip install -r requirements.txt` + `ffmpeg` có sẵn
-> (`ffprobe -version`) + `google-colab-cli` đã mint `COLAB_TOKEN_JSON`.
-> Thiếu `ffprobe` sẽ khiến job bị `FAILED` vĩnh viễn
-> do trùng substring kiểm tra trong worker.
+> Yêu cầu local: `pip install -r requirements.txt` + `google-colab-cli` đã mint
+> `COLAB_TOKEN_JSON`. Worker chạy trên Colab VM — máy local chỉ cần gspread
+> (controller) + `google-colab-cli`.
 
 ```bash
 export TELEGRAM_API_ID=... TELEGRAM_API_HASH=... TARGET_CHANNEL=-100... \
@@ -144,7 +144,10 @@ python -m controller.colab_dispatch
 3. GitHub → Actions → video-controller → Run workflow → mode `sweep`.
 4. Kỳ vọng: sweep đổi hàng sang `RETRY`, `retry_count` tăng; watchdog cron
    hoặc run workflow kế tiếp claim lại → controller cấp VM mới → worker đọc
-   `checkpoint` → tiếp tục tải từ byte N (KHÔNG tải lại từ đầu).
+   `checkpoint` → thấy part rỗng (`video.part` không xuyên session) → mismatch
+   → reset `checkpoint` về `dl:0` → tải lại từ đầu. Checkpoint chống mất state
+   trong-session và giúp chẩn đoán điểm chết; xuyên-session chỉ khi dùng Drive
+   mount (không dùng trong pipeline này).
 5. Lặp để `retry_count` đạt 3 → sweep lần nữa → `FAILED` + tin ❌.
 
 ## 10. Sự cố thường gặp
@@ -156,13 +159,13 @@ python -m controller.colab_dispatch
 | `FloodWaitError` | Worker đã set flood_sleep_threshold=120; nếu vẫn chờ lâu hơn, để job treo → sweep RETRY |
 | Sheet `PERMISSION_DENIED` | SA chưa được Share Editor Sheet |
 | Video không stream được trong kênh | ffprobe chặn file không có video stream; codec lạ (vd HEVC/mkv) vẫn qua ffprobe nhưng kênh có thể không stream được |
-| `ffprobe`/`ffmpeg` thiếu | Kiểm tra workflow job có step `Cài ffprobe` |
+| `ffprobe`/`ffmpeg` thiếu trên VM | VM Colab có sẵn `ffprobe`; validate fail → kiểm tra source file có video stream không |
 | Exit code 1 (Actions đỏ) | Lỗi tạm thời — không can thiệp, sweep tự RETRY |
 | Exit code 2 (Actions đỏ) | Lỗi vĩnh viễn — xem cột error trên Sheet |
 | Bootstrap `TypeError: json.loads() arg 1 must be str, bytes or bytearray, not dict` | Đã fix: bootstrap encode dict thành JSON string trước khi nhét env; KHÔNG double-encode |
 | `KeyError: WORKER_REPO` | Chưa set variable `WORKER_REPO` trong Settings → Variables |
 | HTTP 416 / chunk rỗng ở cuối file | File đúng bội số 256MB → EOF guard: worker tự assemble; nếu part non-empty ở EOF → ghép; nếu part rỗng → transient retry |
-| Runtime Colab chết giữa chừng | Checkpoint chunk lên Sheet → VM mới claim → đọc `checkpoint` → tiếp tục từ byte N (KHÔNG mất phần đã tải) |
+| Runtime Colab chết giữa chừng | VM mới đọc `checkpoint` → thấy part rỗng (`video.part` không xuyên session) → mismatch → reset `checkpoint` về `dl:0` → tải lại từ đầu. Checkpoint chống mất state trong-session và giúp chẩn đoán điểm chết; xuyên-session chỉ khi dùng Drive mount (không dùng) |
 | Colab CLI wheel 0.6.0 không có `--env` | Dùng bootstrap mode (`colab run bootstrap`) — đã fix trong controller |
 | Exact-multiple 256MB EOF | Worker ghi checkpoint `dl:<bytes>` sau mỗi chunk; EOF guard xử lý boundary 416 |
 
