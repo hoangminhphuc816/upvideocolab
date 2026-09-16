@@ -132,10 +132,12 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
 Bot mới (bot pipeline) tách hẳn Apps Script project riêng — bot cũ (GetXBot)
 không bị đụng tới, vẫn chạy làm backup. Bot mới chỉ chấp nhận tin nhắn từ bạn:
 
-- **Lớp 1 — Webhook secret**: Telegram đính kèm header
-  `X-Telegram-Bot-Api-Secret-Token` trên mỗi update (`setWebhook
-  &secret_token=...`). Ai POST giả vào URL `/exec` mà không biết secret → bị
-  loại ngay (không đọc nội dung).
+- **Lớp 1 — Secret trong URL webhook**: GAS **không đọc được request
+  headers** (doPost `e.headers` không tồn tại — verify thực tế), nên secret
+  truyền qua query: URL webhook là
+  `<URL_EXEC>%3Ftoken%3D<WEBHOOK_SECRET>`. Ai POST giả tới URL `/exec` mà
+  thiếu/không biết token → bị loại ngay.
+
 - **Lớp 2 — Whitelist `OWNER_CHAT_ID`**: chỉ tin nhắn từ chat_id của bạn được
   xử lý; người khác nhắn → im lặng tuyệt đối, không phản hồi gì (chống spam,
   không lộ bot có sống).
@@ -150,10 +152,13 @@ không bị đụng tới, vẫn chạy làm backup. Bot mới chỉ chấp nh�
    `BOT_TOKEN`, `OWNER_CHAT_ID`, `WEBHOOK_SECRET` (chuỗi ngẫu nhiên, vd
    `openssl rand -hex 32`), `SHEET_ID`, `WORKER_REPO`, `GITHUB_PAT`.
 4. Deploy → New deployment → Web app → Execute as: **Me** → Who has access:
-   **Anyone** (an toàn — có secret header chặn) → copy URL `/exec`.
-5. Đăng ký webhook (dán token + URL + secret thật):
+   **Anyone** (an toàn — có secret query token chặn) → copy URL `/exec`.
+5. Đăng ký webhook — secret nằm TRONG URL (GAS không đọc được headers):
    ```bash
-   curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<URL_EXEC>&secret_token=<WEBHOOK_SECRET>&allowed_updates=%5B%22message%22%5D"
+   # Nối secret vào URL rồi encode cả khối:
+   python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1] + '?token=' + sys.argv[2], safe=''))" '<URL_EXEC>' '<WEBHOOK_SECRET>'
+   # → chuỗi đã encode, dán vào url=
+   curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<CHUỖI_đã_encode>&allowed_updates=%5B%22message%22%5D&drop_pending_updates=true"
    # phải trả {"ok":true,...}
    ```
 6. Test: từ tài khoản của bạn gửi 1 link X có video vào bot mới → nhận

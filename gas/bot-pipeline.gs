@@ -21,10 +21,11 @@
 //        SHEET_ID         = id Google Sheet queue
 //        WORKER_REPO      = owner/repo repo pipeline
 //        GITHUB_PAT       = PAT (Contents: RW)
-//   4. Deploy → New deployment → Web app → Execute as: Me
-//      → Who has access: Anyone  (an toàn — có secret header chặn)
-//   5. Đăng ký webhook (thay token + URL + secret):
-//        curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<URL_EXEC>&secret_token=<WEBHOOK_SECRET>&allowed_updates=[\"message\"]"
+//      → Who has access: Anyone  (secret query token chặn người giả)
+//   5. Đăng ký webhook — LƯU Ý: secret phải nằm TRONG URL (không dùng
+//      secret_token= của Telegram vì GAS không đọc được request headers):
+//        URL_EXEC_TOKEN = <URL_EXEC>%3Ftoken%3D<WEBHOOK_SECRET>
+//        curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<URL_EXEC_TOKEN>&allowed_updates=%5B%22message%22%5D&drop_pending_updates=true"
 //   6. Gửi thử 1 link X từ tài khoản của bạn → nhận "Đã tạo job ...".
 //
 // ROLLBACK: bot cũ không bị ảnh hưởng gì. Tắt bot mới:
@@ -38,14 +39,19 @@ function doGet() {
 function doPost(e) {
   var props = PropertiesService.getScriptProperties();
   try {
-    // ---- Log chẩn đoán: thấy ngay rẽ nhánh nào trong Executions ----
+    // ---- Lớp 1: secret token truyền qua query URL webhook ----
+    // Apps Script KHÔNG expose request headers cho doPost (e.headers undefined —
+    // đã verify thực tế: hasHeaders=false). Dùng secret trong URL:
+    //   setWebhook?url=<URL_EXEC_đã_encode>%3Ftoken%3D<WEBHOOK_SECRET>
+    // Telegram giữ nguyên query khi POST → GAS đọc qua e.parameter.token.
+    var expected = props.getProperty('WEBHOOK_SECRET');
+    var got = (e && e.parameter && e.parameter.token) ? String(e.parameter.token) : '';
     var diag = '';
     try {
       diag = JSON.stringify({
         hasPostData: !!(e && e.postData),
-        hasHeaders: !!(e && e.headers),
-        headerKeys: e && e.headers ? Object.keys(e.headers) : [],
-        secretMatch: e && e.headers ? (e.headers['X-Telegram-Bot-Api-Secret-Token'] === props.getProperty('WEBHOOK_SECRET')) : false,
+        queryParams: e && e.parameter ? Object.keys(e.parameter) : [],
+        secretMatch: !!(expected && got === expected),
         chatId: (e && e.postData) ? (function () {
           try { return JSON.parse(e.postData.contents).message?.chat?.id || null; }
           catch (err) { return 'parse-fail'; }
@@ -56,14 +62,6 @@ function doPost(e) {
     console.log('PIPELINE-DIAG ' + diag);
     // Tự báo cáo log về Telegram cho owner — không phụ thuộc UI Executions
     debugToOwner('DIAG ' + diag);
-
-    // ---- Lớp 1: chỉ nhận update thật từ Telegram (secret header) ----
-    var expected = props.getProperty('WEBHOOK_SECRET');
-    var got = '';
-    if (e && e.headers) {
-      got = e.headers['X-Telegram-Bot-Api-Secret-Token'] ||
-            e.headers['x-telegram-bot-api-secret-token'] || '';
-    }
     if (!expected || got !== expected) {
       console.warn('PIPELINE-BLOCK secret mismatch (got_len=' + got.length + ')');
       debugToOwner('BLOCK: secret mismatch (got_len=' + got.length + ')');
