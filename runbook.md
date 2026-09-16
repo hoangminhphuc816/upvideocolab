@@ -20,6 +20,33 @@
 3. Copy chuỗi in ra → Actions secret `TELETHON_SESSION`.
    (Session bị thu hồi/thao tác đổi mật khẩu → chạy lại bước này + update secret.)
 
+
+## 3a. Giữ session Telegram ổn định (giảm rủi ro bị thu hồi)
+
+**Không chặn 100%** — Telegram luôn có quyền revoke session (cơ chế bảo mật).
+Worker đã cấu hình sẵn các điểm có kiểm soát:
+
+- **api_id/api_hash riêng** (§2): không dùng api public chung — Telegram đánh
+  giá theo app id; api riêng giảm rủi ro flag.
+- **Fingerprint client**: worker tạo client với tham số giả lập Telegram
+  Desktop chính thức (`device_model="Desktop"`,
+  `system_version="Windows 11 x64"`, `app_version="7.2.8"`,
+  `lang_code="en"`) — tránh fingerprint Telethon mặc định
+  ("PC 64bit"/kernel-release/"1.45.0") dễ bị nhận diện client không chính thống.
+  Đã pin trong test (`test_uploader.py`).
+- **Session chạy đúng 1 nơi**: concurrency group `video-worker` đảm bảo không
+  bao giờ 2 client cùng session đồng thời. KHÔNG chạy worker local song song
+  với Actions (`AuthKeyDuplicatedError`).
+- **Disconnect đúng cách**: worker luôn `await client.disconnect()` trong
+  `finally` (kể cả khi lỗi).
+- **Không làm trên app Telegram khi session đang sống**: đổi mật khẩu /
+  bật-tắt 2FA / "Kết thúc phiên" trong Cài đặt → Thiết bị — mọi thao tác này
+  thu hồi session (bắt buộc re-mint `make_session.py` + update secret).
+
+Session bị revoke bất cứ lúc nào (không có cờ "không bao giờ thu hồi") —
+quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
+`TELETHON_SESSION`.
+
 ## 3b. Pre-mint COLAB_TOKEN_JSON (Colab CLI OAuth2)
 
 > Mục này thực hiện **1 lần trên máy local** để tạo refresh token dùng headless

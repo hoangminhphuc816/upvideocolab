@@ -29,6 +29,14 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
             StringSession(cfg.telethon_session),
             cfg.api_id,
             cfg.api_hash,
+            # Giả lập client Telegram Desktop chính thức — fingerprint ổn định,
+            # tránh user-agent Telethon mặc định ("PC 64bit"/kernel-release/1.45.0)
+            # dễ bị nhận diện client không chính thống (runbook §3c).
+            device_model="Desktop",
+            system_version="Windows 11 x64",
+            app_version="7.2.8",
+            lang_code="en",
+            system_lang_code="en-US",
             flood_sleep_threshold=120,
         )
     except Exception as e:
