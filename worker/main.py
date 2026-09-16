@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 
 from worker.config import Config, SWEEP_REQUIRED, load_config
 from worker.downloader import CHUNK_SIZE, DownloadError, download_chunk, download_to_file, probe_range_support, assemble, validate_video
@@ -130,6 +131,25 @@ def run_sweep(cfg: Config) -> int:
     return 0
 
 
+def _run_once_blocking(cfg: Config) -> int:
+    """Chạy run_once(cfg) từ code đồng bộ.
+
+    Trên script/CLI thường: asyncio.run() trực tiếp. Trên Jupyter/Colab kernel
+    (colab run exec bootstrap) đã có event loop đang chạy trong thread chính —
+    asyncio.run() raise RuntimeError → chuyển sang thread riêng có loop riêng.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(run_once(cfg))
+
+    result: list[int] = []
+    t = threading.Thread(target=lambda: result.append(asyncio.run(run_once(cfg))))
+    t.start()
+    t.join()
+    return result[0]
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if "--sweep" in sys.argv[1:]:
@@ -137,7 +157,7 @@ def main() -> int:
         return run_sweep(cfg)
     cfg = load_config()
     try:
-        return asyncio.run(run_once(cfg))
+        return _run_once_blocking(cfg)
     except (DownloadError, UploadError):
         log.exception("job lỗi tạm thời — sweep sẽ RETRY")
         return 1
