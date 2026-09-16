@@ -52,7 +52,6 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
         await client.get_dialogs()  # warm entity cache (các dialog của account)
     except Exception:
         pass  # cache warm fail không chặn — send_file sẽ tự resolve
-
     last = -1
 
     def progress(sent: int, total: int) -> None:
@@ -64,12 +63,25 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
             last = pct
             log.info("upload %s: %d%%", caption, pct)
 
+    # Metadata video (width/height/duration) — Telegram player cần để stream
+    # đúng: thiếu → màn đen trên web, sai tỉ lệ khung trên app.
+    from worker.downloader import probe_video_metadata
+    from telethon.tl.types import DocumentAttributeVideo
+    try:
+        width, height, duration = probe_video_metadata(path)
+    except Exception:
+        width, height, duration = 0, 0, 0
+    attributes = ([DocumentAttributeVideo(
+        w=width, h=height, duration=duration, supports_streaming=True
+    )] if width and height else None)
+
     try:
         msg = await client.send_file(
             cfg.target_channel,
             path,
             caption=caption[:1024],
             supports_streaming=True,
+            attributes=attributes,
             progress_callback=progress,
         )
         return msg.id

@@ -60,8 +60,6 @@ function doPost(e) {
       });
     } catch (diagErr) { diag = 'diag-fail: ' + diagErr; }
     console.log('PIPELINE-DIAG ' + diag);
-    // Tự báo cáo log về Telegram cho owner — không phụ thuộc UI Executions
-    debugToOwner('DIAG ' + diag);
     if (!expected || got !== expected) {
       console.warn('PIPELINE-BLOCK secret mismatch (got_len=' + got.length + ')');
       debugToOwner('BLOCK: secret mismatch (got_len=' + got.length + ')');
@@ -73,10 +71,13 @@ function doPost(e) {
     if (update.update_id) {
       var cache = CacheService.getScriptCache();
       if (cache.get('upd:' + update.update_id)) {
-        return ContentService.createTextOutput('ok');
+        return ContentService.createTextOutput('ok'); // retry cũ: nuốt im lặng
       }
       cache.put('upd:' + update.update_id, '1', 21600); // giữ 6h
     }
+
+    // DIAG chỉ gửi sau dedupe — update retry không spam tin nhắn
+    debugToOwner('DIAG ' + diag);
 
     if (!update.message || !update.message.text) {
       console.warn('PIPELINE-SKIP no message text');

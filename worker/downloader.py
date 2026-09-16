@@ -127,3 +127,30 @@ def validate_video(path: str) -> None:
         raise DownloadError(
             f"ffprobe không đọc được video stream: {(proc.stderr or '').strip()[:200]}"
         )
+
+
+def probe_video_metadata(path: str) -> tuple[int, int, int]:
+    """Trả về (width, height, duration_seconds) qua ffprobe.
+
+    Gắn vào DocumentAttributeVideo khi upload — Telegram player cần
+    width/height/duration để stream đúng (thiếu → màn đen trên web,
+    sai tỉ lệ khung trên app). Lỗi ffprobe → (0, 0, 0): send_file
+    vẫn chạy (không attrs), chỉ mất metadata.
+    """
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height:format=duration",
+             "-of", "json", path],
+            capture_output=True, text=True, timeout=60,
+        )
+        import json as _json
+        data = _json.loads(proc.stdout or "{}")
+        stream = (data.get("streams") or [{}])[0]
+        width = int(stream.get("width") or 0)
+        height = int(stream.get("height") or 0)
+        duration = int(float(data.get("format", {}).get("duration") or 0))
+        return width, height, duration
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError):
+        return 0, 0, 0
+
