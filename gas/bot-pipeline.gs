@@ -54,6 +54,8 @@ function doPost(e) {
       });
     } catch (diagErr) { diag = 'diag-fail: ' + diagErr; }
     console.log('PIPELINE-DIAG ' + diag);
+    // Tự báo cáo log về Telegram cho owner — không phụ thuộc UI Executions
+    debugToOwner('DIAG ' + diag);
 
     // ---- Lớp 1: chỉ nhận update thật từ Telegram (secret header) ----
     var expected = props.getProperty('WEBHOOK_SECRET');
@@ -64,6 +66,7 @@ function doPost(e) {
     }
     if (!expected || got !== expected) {
       console.warn('PIPELINE-BLOCK secret mismatch (got_len=' + got.length + ')');
+      debugToOwner('BLOCK: secret mismatch (got_len=' + got.length + ')');
       return ContentService.createTextOutput('forbidden'); // im lặng, không chi tiết
     }
 
@@ -79,6 +82,7 @@ function doPost(e) {
 
     if (!update.message || !update.message.text) {
       console.warn('PIPELINE-SKIP no message text');
+      debugToOwner('SKIP: no message text');
       return ContentService.createTextOutput('ok');
     }
     var chatId = update.message.chat.id;
@@ -88,6 +92,7 @@ function doPost(e) {
     var owner = String(props.getProperty('OWNER_CHAT_ID') || '');
     if (!owner || String(chatId) !== owner) {
       console.warn('PIPELINE-BLOCK whitelist: chatId=' + chatId + ' owner=' + owner);
+      debugToOwner('BLOCK: whitelist chatId=' + chatId + ' owner=' + owner);
       return ContentService.createTextOutput('ok'); // người lạ: im lặng tuyệt đối
     }
 
@@ -238,5 +243,27 @@ function sendTelegramMessage(chatId, text) {
     });
   } catch (e) {
     // Không gửi được thì thôi — không có kênh nào khác để báo
+  }
+}
+
+/**
+ * Gửi log chẩn đoán thẳng tới OWNER qua Telegram (bypass whitelist — chỉ chạy
+ * khi OWNER_CHAT_ID đã set). Mục đích: debug không cần mở UI Executions.
+ * Tắt bằng cách set Script Property DEBUG = "off".
+ */
+function debugToOwner(text) {
+  var props = PropertiesService.getScriptProperties();
+  if (String(props.getProperty('DEBUG') || 'on').toLowerCase() === 'off') return;
+  var owner = props.getProperty('OWNER_CHAT_ID');
+  if (!owner) return;
+  try {
+    UrlFetchApp.fetch('https://api.telegram.org/bot' + props.getProperty('BOT_TOKEN') + '/sendMessage', {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ chat_id: owner, text: '🔧 ' + String(text).slice(0, 3800) }),
+      muteHttpExceptions: true
+    });
+  } catch (e) {
+    // im lặng
   }
 }
