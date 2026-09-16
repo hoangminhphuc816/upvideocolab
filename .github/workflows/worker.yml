@@ -46,7 +46,9 @@ jobs:
       - name: Cài dependencies + Colab CLI
         run: |
           pip install -r requirements.txt
-          pip install google-colab-cli
+          # colab-cli 0.6.0 import jupyter_kernel_client.KernelClient — chỉ tồn tại
+          # ở 0.x; 1.0.x đổi tên thành JupyterKernelClient → AttributeError. Pin 0.7.3.
+          pip install "jupyter-kernel-client==0.7.3" google-colab-cli
       - name: Dispatch job lên Colab VM (worker chạy trên VM)
         run: python -m controller.colab_dispatch
 
@@ -75,7 +77,8 @@ jobs:
       - name: Cài dependencies + Colab CLI
         run: |
           pip install -r requirements.txt
-          pip install google-colab-cli
+          # Pin như job worker — colab-cli 0.6.0 cần KernelClient (0.x)
+          pip install "jupyter-kernel-client==0.7.3" google-colab-cli
       - name: Sweep job treo (trên runner — chỉ Sheet + notify)
         run: python -m worker.main --sweep
       - name: Xử lý job PENDING/RETRY còn lại (watchdog → Colab VM)
