@@ -1,5 +1,17 @@
 # Runbook — Pipeline MP4 → Kênh Telegram riêng tư
 
+> **Quy tắc bắt buộc khi làm việc với Python trên máy local:** KHÔNG pip install
+> thẳng vào system Python. Luôn tạo môi trường ảo trước:
+>
+> ```bash
+> python -m venv .venv
+> source .venv/bin/activate
+> pip install telethon   # hoặc: pip install -r requirements.txt
+> ```
+>
+> Mọi lệnh `pip install` trong runbook này hiểu là chạy trong `.venv` đã
+> activate. Thoát môi trường: `deactivate`.
+
 ## 1. Kênh Telegram riêng tư + ID
 
 1. Tạo kênh riêng tư trong app Telegram (Create channel → Private).
@@ -15,7 +27,7 @@
 
 ## 3. StringSession (đăng nhập Telethon 1 lần)
 
-1. Local: `pip install telethon && python tools/make_session.py`
+1. Local (trong `.venv` — quy tắc đầu file): `pip install telethon && python tools/make_session.py`
 2. Nhập api_id/api_hash, số điện thoại, mã code Telegram gửi.
 3. Copy chuỗi in ra → Actions secret `TELETHON_SESSION`.
    (Session bị thu hồi/thao tác đổi mật khẩu → chạy lại bước này + update secret.)
@@ -55,7 +67,7 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
 
 1. Trên máy local:
    ```bash
-   pip install google-colab-cli
+   pip install google-colab-cli   # trong .venv (xem quy tắc đầu file)
    colab version
    colab whoami
    ```
@@ -128,7 +140,8 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
 
 ### a) Smoke 100MB qua local controller
 
-> Yêu cầu local: `pip install -r requirements.txt` + `google-colab-cli` đã mint
+> Yêu cầu local: `.venv` + `pip install -r requirements.txt` (quy tắc đầu file) +
+> `google-colab-cli` đã mint
 > `COLAB_TOKEN_JSON`. Worker chạy trên Colab VM — máy local chỉ cần gspread
 > (controller) + `google-colab-cli`.
 

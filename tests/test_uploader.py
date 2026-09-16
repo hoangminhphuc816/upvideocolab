@@ -34,7 +34,7 @@ async def test_upload_returns_message_id_and_disconnects():
     assert callable(kwargs["progress_callback"])
     args_tc, kwargs_tc = tc.call_args
     assert kwargs_tc["flood_sleep_threshold"] == 120
-    # Fingerprint client giả lập Telegram Desktop (runbook §3c)
+    # Fingerprint client giả lập Telegram Desktop (runbook §3a)
     assert kwargs_tc["device_model"] == "Desktop"
     assert kwargs_tc["system_version"] == "Windows 11 x64"
     assert kwargs_tc["app_version"] == "7.2.8"

@@ -31,7 +31,7 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
             cfg.api_hash,
             # Giả lập client Telegram Desktop chính thức — fingerprint ổn định,
             # tránh user-agent Telethon mặc định ("PC 64bit"/kernel-release/1.45.0)
-            # dễ bị nhận diện client không chính thống (runbook §3c).
+            # dễ bị nhận diện client không chính thống (runbook §3a).
             device_model="Desktop",
             system_version="Windows 11 x64",
             app_version="7.2.8",
