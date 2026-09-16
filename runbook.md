@@ -113,7 +113,8 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
    `TELETHON_SESSION`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TARGET_CHANNEL`,
    `OWNER_CHAT_ID`, `GCP_SA_JSON`, `SHEET_ID`, `BOT_TOKEN`, `COLAB_TOKEN_JSON`.
    - `OWNER_CHAT_ID`: chat_id cá nhân của bạn (nhắn tin cho @userinfobot để lấy).
-   - `BOT_TOKEN`: token bot Telegram hiện có (cùng bot đang nhận request X).
+   - `BOT_TOKEN`: token **bot pipeline mới** (§8 — bot riêng cho pipeline; bot
+     cũ GetXBot không dùng vào pipeline).
    - `COLAB_TOKEN_JSON`: nội dung file `~/.config/colab-cli/token.json` từ §3b.
 3. Mở **Variables** (cùng trang Secrets and variables → Variables) → thêm:
    `WORKER_REPO` = `owner/repo` (repo chứa pipeline này).
@@ -126,15 +127,44 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
    xuống VM; controller chỉ dùng nội dung JSON để materialize runner-local
    `~/.config/colab-cli/token.json` rồi chạy `colab run`.
 
-## 8. Gắn GAS vào flow hiện tại
+## 8. Bot Telegram mới (bot pipeline riêng — bot cũ giữ nguyên làm backup)
 
-1. Mở project Apps Script hiện tại → New file → dán toàn bộ
-   `gas/telegram-pipeline.gs`.
-2. Project Settings → Script Properties → thêm: `SHEET_ID`, `WORKER_REPO`
-   (`owner/repo`), `GITHUB_PAT`.
-3. Trong `doPost`, sau khi resolve ra MP4 URL, thêm:
-   `pipelineCreateJobAndDispatch(mp4Url, chatId);`
-4. Deploy → Manage deployments → Edit → New version → Deploy (URL /exec giữ nguyên).
+Bot mới (bot pipeline) tách hẳn Apps Script project riêng — bot cũ (GetXBot)
+không bị đụng tới, vẫn chạy làm backup. Bot mới chỉ chấp nhận tin nhắn từ bạn:
+
+- **Lớp 1 — Webhook secret**: Telegram đính kèm header
+  `X-Telegram-Bot-Api-Secret-Token` trên mỗi update (`setWebhook
+  &secret_token=...`). Ai POST giả vào URL `/exec` mà không biết secret → bị
+  loại ngay (không đọc nội dung).
+- **Lớp 2 — Whitelist `OWNER_CHAT_ID`**: chỉ tin nhắn từ chat_id của bạn được
+  xử lý; người khác nhắn → im lặng tuyệt đối, không phản hồi gì (chống spam,
+  không lộ bot có sống).
+- Token bot + mọi credential nằm trong Script Properties (không hardcode).
+- Dedupe `update_id` (Cache 6h) — Telegram retry không tạo job đôi.
+
+1. @BotFather → `/newbot` → tạo **bot mới** → copy `BOT_TOKEN`.
+2. Tạo **Apps Script project MỚI** (script.google.com → New project) → dán
+   toàn bộ `gas/bot-pipeline.gs` (file này tự chứa logic resolve getxbot +
+   pipeline — không cần file cũ).
+3. Project Settings → Script Properties → thêm 6 biến:
+   `BOT_TOKEN`, `OWNER_CHAT_ID`, `WEBHOOK_SECRET` (chuỗi ngẫu nhiên, vd
+   `openssl rand -hex 32`), `SHEET_ID`, `WORKER_REPO`, `GITHUB_PAT`.
+4. Deploy → New deployment → Web app → Execute as: **Me** → Who has access:
+   **Anyone** (an toàn — có secret header chặn) → copy URL `/exec`.
+5. Đăng ký webhook (dán token + URL + secret thật):
+   ```bash
+   curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<URL_EXEC>&secret_token=<WEBHOOK_SECRET>&allowed_updates=%5B%22message%22%5D"
+   # phải trả {"ok":true,...}
+   ```
+6. Test: từ tài khoản của bạn gửi 1 link X có video vào bot mới → nhận
+   `✅ Đã tạo job JOB-...`; từ tài khoản KHÁC nhắn bot → im lặng (verify whitelist).
+7. Tắt tạm / rollback bot mới (bot cũ không bị ảnh hưởng):
+   `curl "https://api.telegram.org/bot<BOT_TOKEN>/deleteWebhook"`.
+
+> `gas/telegram-pipeline.gs` (module chỉ có pipeline) giữ lại cho phương án B:
+> muốn bot CŨ trực tiếp tạo job — dán module đó vào project bot cũ rồi gọi
+> `pipelineCreateJobAndDispatch(mp4Url, chatId)` trong `doPost` (nhưng bot cũ
+> hiện KHÔNG có whitelist — ai biết bot là nhắn được, chưa khắc phục).
 
 ## 9. Test tích hợp thật (theo thứ tự)
 
