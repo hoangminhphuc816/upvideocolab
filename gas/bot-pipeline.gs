@@ -38,6 +38,23 @@ function doGet() {
 function doPost(e) {
   var props = PropertiesService.getScriptProperties();
   try {
+    // ---- Log chẩn đoán: thấy ngay rẽ nhánh nào trong Executions ----
+    var diag = '';
+    try {
+      diag = JSON.stringify({
+        hasPostData: !!(e && e.postData),
+        hasHeaders: !!(e && e.headers),
+        headerKeys: e && e.headers ? Object.keys(e.headers) : [],
+        secretMatch: e && e.headers ? (e.headers['X-Telegram-Bot-Api-Secret-Token'] === props.getProperty('WEBHOOK_SECRET')) : false,
+        chatId: (e && e.postData) ? (function () {
+          try { return JSON.parse(e.postData.contents).message?.chat?.id || null; }
+          catch (err) { return 'parse-fail'; }
+        })() : null,
+        ownerSet: !!props.getProperty('OWNER_CHAT_ID')
+      });
+    } catch (diagErr) { diag = 'diag-fail: ' + diagErr; }
+    console.log('PIPELINE-DIAG ' + diag);
+
     // ---- Lớp 1: chỉ nhận update thật từ Telegram (secret header) ----
     var expected = props.getProperty('WEBHOOK_SECRET');
     var got = '';
@@ -46,6 +63,7 @@ function doPost(e) {
             e.headers['x-telegram-bot-api-secret-token'] || '';
     }
     if (!expected || got !== expected) {
+      console.warn('PIPELINE-BLOCK secret mismatch (got_len=' + got.length + ')');
       return ContentService.createTextOutput('forbidden'); // im lặng, không chi tiết
     }
 
@@ -60,6 +78,7 @@ function doPost(e) {
     }
 
     if (!update.message || !update.message.text) {
+      console.warn('PIPELINE-SKIP no message text');
       return ContentService.createTextOutput('ok');
     }
     var chatId = update.message.chat.id;
@@ -68,6 +87,7 @@ function doPost(e) {
     // ---- Lớp 2: WHITELIST — chỉ chủ sở hữu được xử lý ----
     var owner = String(props.getProperty('OWNER_CHAT_ID') || '');
     if (!owner || String(chatId) !== owner) {
+      console.warn('PIPELINE-BLOCK whitelist: chatId=' + chatId + ' owner=' + owner);
       return ContentService.createTextOutput('ok'); // người lạ: im lặng tuyệt đối
     }
 
@@ -84,6 +104,7 @@ function doPost(e) {
 
     // ---- Resolve MP4 (cùng logic getxbot như bot cũ) ----
     var mp4Url = getHighestQualityVideo(match[1]);
+    console.log('PIPELINE-RESOLVE link=' + match[1] + ' → ' + (mp4Url ? 'OK' : 'FAIL'));
     if (!mp4Url) {
       sendTelegramMessage(chatId,
           "❌ Không resolve được video. Kiểm tra link (tweet có video?) rồi thử lại.");
@@ -92,6 +113,7 @@ function doPost(e) {
 
     // ---- Tạo job + dispatch worker ngay ----
     var jobId = pipelineCreateJobAndDispatch(mp4Url, chatId);
+    console.log('PIPELINE-JOB ' + jobId + ' chat=' + chatId);
     sendTelegramMessage(chatId,
         "✅ Đã tạo job " + jobId + "\n" +
         "🎬 Video đang được tải và upload lên kênh (vài phút tuỳ dung lượng).\n" +
