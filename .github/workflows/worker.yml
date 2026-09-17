@@ -3,8 +3,6 @@ name: video-controller
 on:
   repository_dispatch:
     types: [video-job]
-  schedule:
-    - cron: "0 */2 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -54,9 +52,7 @@ jobs:
         run: python -m controller.colab_dispatch
 
   sweep:
-    if: >-
-      github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'sweep')
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'sweep'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
