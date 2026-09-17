@@ -115,6 +115,17 @@ function doPost(e) {
       return ContentService.createTextOutput('ok');
     }
 
+    // ---- Chống trùng lặp theo nội dung: update_id cache chỉ giữ 6h (giới hạn
+    // Apps Script Cache) — Telegram có thể retry update CŨ sau 6h. Nếu URL MP4
+    // giống hệt job DONE gần nhất (<24h) → bỏ qua, không tạo job trùng.
+    var recentDup = isRecentlyDone(mp4Url);
+    if (recentDup) {
+      console.log('PIPELINE-DUP ' + mp4Url + ' → job ' + recentDup + ' đã DONE');
+      sendTelegramMessage(chatId,
+          "ℹ️ Video này đã được upload gần đây (job " + recentDup + "). Không tạo lại.");
+      return ContentService.createTextOutput('ok');
+    }
+
     // ---- Tạo job + dispatch worker ngay ----
     var jobId = pipelineCreateJobAndDispatch(mp4Url, chatId);
     console.log('PIPELINE-JOB ' + jobId + ' chat=' + chatId);
@@ -265,4 +276,32 @@ function debugToOwner(text) {
   } catch (e) {
     // im lặng
   }
+}
+
+/**
+ * Kiểm tra URL MP4 đã có job DONE trong 24h gần nhất chưa (chống trùng
+ * khi Telegram retry update cũ sau khi dedupe cache 6h hết hạn).
+ * @return {string} job_id nếu trùng, ngược lại "" (falsy).
+ */
+function isRecentlyDone(mp4Url) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var sheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID'))
+        .getSheetByName('Jobs');
+    if (!sheet) return '';
+    var rows = sheet.getDataRange().getValues();
+    var now = Math.floor(Date.now() / 1000);
+    for (var i = rows.length - 1; i >= 1; i--) {
+      // Cột: 1=job_id, 2=status, 3=url, 6=updated_at
+      if (String(rows[i][1]) === 'DONE' && String(rows[i][2]) === mp4Url) {
+        var updated = Number(rows[i][5]) || 0;
+        if (now - updated < 24 * 3600) {
+          return String(rows[i][0]);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('isRecentlyDone lỗi (bỏ qua, cho phép tạo job): ' + e);
+  }
+  return '';
 }
