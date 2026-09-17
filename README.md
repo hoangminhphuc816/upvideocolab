@@ -48,7 +48,5 @@ Xem `runbook.md` — setup secrets (`COLAB_TOKEN_JSON`, `WORKER_REPO`), Sheet
 
 ## Chi tiết thiết kế
 
-- Spec: `docs/superpowers/specs/2026-09-14-telegram-mp4-pipeline-design.md`
-- Plan: `docs/superpowers/plans/2026-09-14-telegram-mp4-pipeline.md`
 - Anti-abuse v3: session ngắn tự nhiên, KHÔNG keep-alive/hard-limit; checkpoint
   chunk resume trên Sheet; Colab CLI chính thức; `COLAB_TOKEN_JSON` KHÔNG xuống VM.
