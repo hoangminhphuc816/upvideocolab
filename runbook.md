@@ -106,6 +106,18 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
    (nếu 403/404 khi dispatch: thêm **Actions: Read and write**).
 3. Token → GAS Script Property `GITHUB_PAT`.
 
+## 6b. GitHub PAT riêng cho cron-job.org (dispatch sweep)
+
+1. GitHub → Settings → Developer settings → Fine-grained tokens → Generate.
+2. Chỉ repo worker; permission **Actions: Read and write** (KHÁC §6 —
+   PAT §6 là Contents:RW cho repository_dispatch; PAT §6b là Actions:RW
+   cho workflow_dispatch).
+3. Token KHÔNG lưu vào repo/GAS — chỉ dán vào headers của job
+   `github-sweep-dispatch` trên console.cron-job.org.
+4. Rotate: token hết hạn (mặc định 90 ngày) → tạo token mới → PATCH job
+   trên cron-job.org (sửa header Authorization) → xong. Cron-job.org có
+   email onFailure — email đến = PAT chết là khả năng số 1.
+
 ## 7. Repo + secrets + workflow
 
 1. Push repo này lên GitHub, đặt **public** (bắt buộc để free unlimited minutes).
@@ -118,8 +130,13 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
    - `COLAB_TOKEN_JSON`: nội dung file `~/.config/colab-cli/token.json` từ §3b.
 3. Mở **Variables** (cùng trang Secrets and variables → Variables) → thêm:
    `WORKER_REPO` = `owner/repo` (repo chứa pipeline này).
-4. Lưu ý: workflow `schedule` tự tắt nếu repo không hoạt động 60 ngày —
-   thỉnh thoảng push commit hoặc chấp nhận bật lại tay.
+4. Sweep 2h/lần KHÔNG còn dùng `schedule` GitHub (bị tự tắt sau 60 ngày
+   repo im tiếng). Thay bằng cron-job.org job `github-sweep-dispatch`
+   gọi `workflow_dispatch` (mode=sweep) mỗi 2h lúc :07. Nếu sweep ngừng:
+   - Kiểm tra console.cron-job.org → History job (status phải OK/1xx-2xx).
+   - Email failure từ cron-job.org = PAT hết hạn/token sai → rotate PAT
+     (Task PAT trong §6b) rồi PATCH job qua console (headers → Authorization).
+   - Workflow KHÔNG bị tự tắt nữa vì không còn trigger `schedule`.
 5. Lưu ý pipeline secrets: các secret chỉ tồn tại trong môi trường runner
    ~30 giây, sau đó controller bootstrap truyền env xuống VM qua prelude
    `os.environ` trong `colab_bootstrap.py` (session ephemeral, tự teardown).
