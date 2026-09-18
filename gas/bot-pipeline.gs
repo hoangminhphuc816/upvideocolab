@@ -104,6 +104,12 @@ function doPost(e) {
       return ContentService.createTextOutput('ok');
     }
 
+    var statusId = '';
+    var statusMatch = match[1].match(/status\/(\d+)/i);
+    if (statusMatch) {
+      statusId = statusMatch[1];
+    }
+
     sendTelegramMessage(chatId, "⏳ Đang phân tích link X...");
 
     // ---- Resolve MP4 (cùng logic getxbot như bot cũ) ----
@@ -115,19 +121,20 @@ function doPost(e) {
       return ContentService.createTextOutput('ok');
     }
 
-    // ---- Chống trùng lặp theo nội dung: update_id cache chỉ giữ 6h (giới hạn
-    // Apps Script Cache) — Telegram có thể retry update CŨ sau 6h. Nếu URL MP4
-    // giống hệt job DONE gần nhất (<24h) → bỏ qua, không tạo job trùng.
-    var recentDup = isRecentlyDone(mp4Url);
+    // ---- Chống trùng lặp theo status_id, fallback URL cho hàng cũ ----
+    var recentDup = isRecentlyDone(mp4Url, statusId);
     if (recentDup) {
       console.log('PIPELINE-DUP ' + mp4Url + ' → job ' + recentDup + ' đã DONE');
-      sendTelegramMessage(chatId,
-          "ℹ️ Video này đã được upload gần đây (job " + recentDup + "). Không tạo lại.");
+      var dupMsg = 'ℹ️ Video này đã được upload gần đây (job ' + recentDup + '). Không tạo lại.';
+      if (statusId) {
+        dupMsg += ' (media_key=' + statusId + ')';
+      }
+      sendTelegramMessage(chatId, dupMsg);
       return ContentService.createTextOutput('ok');
     }
 
     // ---- Tạo job + dispatch worker ngay ----
-    var jobId = pipelineCreateJobAndDispatch(mp4Url, chatId);
+    var jobId = pipelineCreateJobAndDispatch(mp4Url, chatId, statusId);
     console.log('PIPELINE-JOB ' + jobId + ' chat=' + chatId);
     sendTelegramMessage(chatId,
         "✅ Đã tạo job " + jobId + "\n" +
@@ -188,7 +195,7 @@ function getHighestQualityVideo(xUrl) {
 // Pipeline: tạo job vào Sheet queue + repository_dispatch (bản sao
 // gas/telegram-pipeline.gs — hợp đồng cột PHẢI khớp worker/sheet_queue.py)
 // ----------------------------------------------------------------------------
-function pipelineCreateJobAndDispatch(mp4Url, chatId) {
+function pipelineCreateJobAndDispatch(mp4Url, chatId, statusId) {
   var props = PropertiesService.getScriptProperties();
   var sheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID'))
       .getSheetByName('Jobs');
@@ -198,8 +205,12 @@ function pipelineCreateJobAndDispatch(mp4Url, chatId) {
   var now = Math.floor(Date.now() / 1000);
   var jobId = 'JOB-' + Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss')
       + '-' + Math.random().toString(36).slice(2, 8);
-  // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id, error, retry_count, checkpoint
-  sheet.appendRow([jobId, 'PENDING', mp4Url, String(chatId), String(now), '', '', '', '', '0', '0']);
+  // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id, error, retry_count, checkpoint, media_key
+  var base = [jobId, 'PENDING', mp4Url, String(chatId), String(now), '', '', '', '', '0', '0'];
+  if (statusId) {
+    base.push(statusId);
+  }
+  sheet.appendRow(base);
   dispatchToGitHub(jobId);
   return jobId;
 }
@@ -279,11 +290,11 @@ function debugToOwner(text) {
 }
 
 /**
- * Kiểm tra URL MP4 đã có job DONE trong 24h gần nhất chưa (chống trùng
- * khi Telegram retry update cũ sau khi dedupe cache 6h hết hạn).
+ * Kiểm tra MP4 đã có job DONE trong 24h gần nhất chưa.
+ * Ưu tiên match theo media_key (status_id) nếu có; fallback URL cho hàng cũ.
  * @return {string} job_id nếu trùng, ngược lại "" (falsy).
  */
-function isRecentlyDone(mp4Url) {
+function isRecentlyDone(mp4Url, statusId) {
   try {
     var props = PropertiesService.getScriptProperties();
     var sheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID'))
@@ -292,12 +303,18 @@ function isRecentlyDone(mp4Url) {
     var rows = sheet.getDataRange().getValues();
     var now = Math.floor(Date.now() / 1000);
     for (var i = rows.length - 1; i >= 1; i--) {
-      // Cột: 1=job_id, 2=status, 3=url, 6=updated_at
-      if (String(rows[i][1]) === 'DONE' && String(rows[i][2]) === mp4Url) {
-        var updated = Number(rows[i][5]) || 0;
-        if (now - updated < 24 * 3600) {
-          return String(rows[i][0]);
-        }
+      if (String(rows[i][1]) !== 'DONE') continue;
+      var updated = Number(rows[i][5]) || 0;
+      if (now - updated >= 24 * 3600) continue;
+      var rowMediaKey = String(rows[i][11] || '');
+      var matched = false;
+      if (statusId && rowMediaKey && rowMediaKey === statusId) {
+        matched = true;
+      } else if (!statusId && String(rows[i][2]) === mp4Url) {
+        matched = true;
+      }
+      if (matched) {
+        return String(rows[i][0]);
       }
     }
   } catch (e) {
