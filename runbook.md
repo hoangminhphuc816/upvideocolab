@@ -171,6 +171,9 @@ không bị đụng tới, vẫn chạy làm backup. Bot mới chỉ chấp nh�
 4. Deploy → New deployment → Web app → Execute as: **Me** → Who has access:
    **Anyone** (an toàn — có secret query token chặn) → copy URL `/exec`.
 5. Đăng ký webhook — secret nằm TRONG URL (GAS không đọc được headers):
+   ⚠️ KHÔNG dùng `secret_token=` của setWebhook — Telegram gửi token đó qua
+   header `X-Telegram-Bot-Api-Secret-Token` mà GAS không đọc được → mọi
+   update bị BLOCK (`got_len=0`). Token phải nằm trong `?token=` của URL.
    ```bash
    # Nối secret vào URL rồi encode cả khối:
    python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1] + '?token=' + sys.argv[2], safe=''))" '<URL_EXEC>' '<WEBHOOK_SECRET>'
