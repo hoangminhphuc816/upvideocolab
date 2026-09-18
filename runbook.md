@@ -259,6 +259,8 @@ python -m controller.colab_dispatch
 | Runtime Colab chết giữa chừng | VM mới đọc `checkpoint` → thấy part rỗng (`video.part` không xuyên session) → mismatch → reset `checkpoint` về `dl:0` → tải lại từ đầu. Checkpoint chống mất state trong-session và giúp chẩn đoán điểm chết; xuyên-session chỉ khi dùng Drive mount (không dùng) |
 | Colab CLI wheel 0.6.0 không có `--env` | Dùng bootstrap mode (`colab run bootstrap`) — đã fix trong controller |
 | Exact-multiple 256MB EOF | Worker ghi checkpoint `dl:<bytes>` sau mỗi chunk; EOF guard xử lý boundary 416 |
+| Bot trả "đã upload gần đây" cho link MỚI | getxbot trả URL sai/trùng (cache IP). Đã fix: dedupe theo status_id (cột L `media_key`) từ link gốc, fallback URL chỉ cho hàng cũ. Nếu tái diễn: kiểm tra cột L đã điền khi tạo job |
+| Video resolve "OK" nhưng bot bảo DUP link khác | Cùng nguyên nhân trên — xem cột L: nếu trống → hàng cũ trước khi fix, fallback theo URL có thể khớp nhầm nếu getxbot từng trả sai URL. Xóa hàng DUP nhầm trong Sheet rồi gửi lại link |
 
 ## 10b. Chính sách anti-abuse v3
 
