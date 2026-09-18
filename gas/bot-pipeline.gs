@@ -33,7 +33,7 @@
 // ============================================================================
 
 function doGet() {
-  return ContentService.createTextOutput("Pipeline bot hoạt động tốt!");
+  return _ok200("Pipeline bot hoạt động tốt!");
 }
 
 function doPost(e) {
@@ -71,7 +71,7 @@ function doPost(e) {
           debugToOwner('BLOCK: secret mismatch (got_len=' + got.length + ') — webhook thiếu ?token= hoặc WEBHOOK_SECRET sai. Chạy getWebhookInfo để so URL.');
         }
       } catch (e2) { /* cache lỗi: bỏ qua throttle, vẫn im lặng */ }
-      return ContentService.createTextOutput('forbidden'); // im lặng, không chi tiết
+      return _ok200('forbidden'); // im lặng, không chi tiết
     }
 
     // ---- Dedupe update_id: Telegram retry khi GAS chậm → tránh tạo job đôi ----
@@ -79,7 +79,7 @@ function doPost(e) {
     if (update.update_id) {
       var cache = CacheService.getScriptCache();
       if (cache.get('upd:' + update.update_id)) {
-        return ContentService.createTextOutput('ok'); // retry cũ: nuốt im lặng
+        return _ok200('ok'); // retry cũ: nuốt im lặng
       }
       cache.put('upd:' + update.update_id, '1', 21600); // giữ 6h
     }
@@ -90,7 +90,7 @@ function doPost(e) {
     if (!update.message || !update.message.text) {
       console.warn('PIPELINE-SKIP no message text');
       debugToOwner('SKIP: no message text');
-      return ContentService.createTextOutput('ok');
+      return _ok200('ok');
     }
     var chatId = update.message.chat.id;
     var text = update.message.text.trim();
@@ -100,7 +100,7 @@ function doPost(e) {
     if (!owner || String(chatId) !== owner) {
       console.warn('PIPELINE-BLOCK whitelist: chatId=' + chatId + ' owner=' + owner);
       debugToOwner('BLOCK: whitelist chatId=' + chatId + ' owner=' + owner);
-      return ContentService.createTextOutput('ok'); // người lạ: im lặng tuyệt đối
+      return _ok200('ok'); // người lạ: im lặng tuyệt đối
     }
 
     // ---- /start hoặc câu không chứa link: hướng dẫn ngắn ----
@@ -109,7 +109,7 @@ function doPost(e) {
       sendTelegramMessage(chatId,
           "🤖 Gửi link X (Twitter) chứa video — tôi sẽ tải và upload lên kênh.\n" +
           "Ví dụ: https://x.com/user/status/123");
-      return ContentService.createTextOutput('ok');
+      return _ok200('ok');
     }
 
     var statusId = '';
@@ -126,7 +126,7 @@ function doPost(e) {
     if (!mp4Url) {
       sendTelegramMessage(chatId,
           "❌ Không resolve được video. Kiểm tra link (tweet có video?) rồi thử lại.");
-      return ContentService.createTextOutput('ok');
+      return _ok200('ok');
     }
 
     // ---- Chống trùng lặp theo status_id, fallback URL cho hàng cũ ----
@@ -138,7 +138,7 @@ function doPost(e) {
         dupMsg += ' (media_key=' + statusId + ')';
       }
       sendTelegramMessage(chatId, dupMsg);
-      return ContentService.createTextOutput('ok');
+      return _ok200('ok');
     }
 
     // ---- Tạo job + dispatch worker ngay ----
@@ -160,7 +160,7 @@ function doPost(e) {
       sendTelegramMessage(cid, "🚨 LỖI HỆ THỐNG (bot pipeline): " + error.toString());
     }
   }
-  return ContentService.createTextOutput('ok');
+  return _ok200('ok');
 }
 
 // ----------------------------------------------------------------------------
@@ -336,4 +336,13 @@ function isRecentlyDone(mp4Url, statusId) {
     console.warn('isRecentlyDone lỗi (bỏ qua, cho phép tạo job): ' + e);
   }
   return '';
+}
+/**
+ * Response 200 trực tiếp KHÔNG redirect — Telegram webhook coi 302 (mà
+ * ContentService.createTextOutput sinh ra) là "Wrong response" → retry vô
+ * hạn rồi drop update (im lặng tuyệt đối). HtmlService.createHtmlOutput
+ * trả 200 thẳng. Dùng cho MỌI return của doPost/doGet.
+ */
+function _ok200(body) {
+  return HtmlService.createHtmlOutput(body || 'ok');
 }
