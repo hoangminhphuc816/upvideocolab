@@ -172,7 +172,11 @@ function getHighestQualityVideo(xUrl) {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({ videoId: xUrl, p: 1 }),
-    muteHttpExceptions: true
+    // timeoutSeconds 15: getxbot chậm/treo từ IP Google → không timeout sẽ
+    // treo doPost 360s (default) → Telegram drop update sau 60s → im lặng
+    // tuyệt đối (đã xảy ra 09:26 17-09). 15s đủ cho getxbot bình thường.
+    muteHttpExceptions: true,
+    timeoutSeconds: 15
   };
   try {
     var response = UrlFetchApp.fetch('https://www.getxbot.com/api/parse', options);
@@ -243,7 +247,8 @@ function dispatchToGitHub(jobId) {
         event_type: 'video-job',
         client_payload: { job_id: jobId }
       }),
-      muteHttpExceptions: true
+      muteHttpExceptions: true,
+      timeoutSeconds: 15
     });
   } catch (err) {
     console.warn('repository_dispatch lỗi transport: ' + err);
@@ -268,7 +273,8 @@ function sendTelegramMessage(chatId, text) {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({ chat_id: chatId, text: text }),
-      muteHttpExceptions: true
+      muteHttpExceptions: true,
+      timeoutSeconds: 10
     });
   } catch (e) {
     // Không gửi được thì thôi — không có kênh nào khác để báo
@@ -290,7 +296,8 @@ function debugToOwner(text) {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({ chat_id: owner, text: '🔧 ' + String(text).slice(0, 3800) }),
-      muteHttpExceptions: true
+      muteHttpExceptions: true,
+      timeoutSeconds: 10
     });
   } catch (e) {
     // im lặng
