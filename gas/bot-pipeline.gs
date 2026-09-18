@@ -62,7 +62,15 @@ function doPost(e) {
     console.log('PIPELINE-DIAG ' + diag);
     if (!expected || got !== expected) {
       console.warn('PIPELINE-BLOCK secret mismatch (got_len=' + got.length + ')');
-      debugToOwner('BLOCK: secret mismatch (got_len=' + got.length + ')');
+      // Throttle: GAS trả 200 → Telegram KHÔNG retry → spam BLOCK = nhiều
+      // update thật thiếu token (webhook sai URL/secret). Chỉ báo 1 lần/5p.
+      try {
+        var _bcache = CacheService.getScriptCache();
+        if (!_bcache.get('blockwarn')) {
+          _bcache.put('blockwarn', '1', 300);
+          debugToOwner('BLOCK: secret mismatch (got_len=' + got.length + ') — webhook thiếu ?token= hoặc WEBHOOK_SECRET sai. Chạy getWebhookInfo để so URL.');
+        }
+      } catch (e2) { /* cache lỗi: bỏ qua throttle, vẫn im lặng */ }
       return ContentService.createTextOutput('forbidden'); // im lặng, không chi tiết
     }
 
