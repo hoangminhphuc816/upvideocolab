@@ -288,8 +288,8 @@ python -m controller.colab_dispatch
 | Runtime Colab chết giữa chừng | VM mới đọc `checkpoint` → thấy part rỗng (`video.part` không xuyên session) → mismatch → reset `checkpoint` về `dl:0` → tải lại từ đầu. Checkpoint chống mất state trong-session và giúp chẩn đoán điểm chết; xuyên-session chỉ khi dùng Drive mount (không dùng) |
 | Colab CLI wheel 0.6.0 không có `--env` | Dùng bootstrap mode (`colab run bootstrap`) — đã fix trong controller |
 | Exact-multiple 256MB EOF | Worker ghi checkpoint `dl:<bytes>` sau mỗi chunk; EOF guard xử lý boundary 416 |
-| Bot trả "đã upload gần đây" cho link MỚI | getxbot trả URL sai/trùng (cache IP). Đã fix: dedupe theo status_id (cột L `media_key`) từ link gốc, fallback URL chỉ cho hàng cũ. Nếu tái diễn: kiểm tra cột L đã điền khi tạo job |
-| Video resolve "OK" nhưng bot bảo DUP link khác | Cùng nguyên nhân trên — xem cột L: nếu trống → hàng cũ trước khi fix, fallback theo URL có thể khớp nhầm nếu getxbot từng trả sai URL. Xóa hàng DUP nhầm trong Sheet rồi gửi lại link |
+| Bot trả "đã upload gần đây" cho link MỚI | Ca tin nhắn đến **không** trích được `statusId` (link không có `/status/<số>`) ⇒ dedup so **URL**, nên khớp nhầm nếu getxbot từng trả URL sai/trùng (cache IP). Đã fix: khi tin nhắn đến **có** `statusId` thì dedup theo cột L `media_key` lấy từ link gốc. Nếu tái diễn: kiểm cột L đã điền khi tạo job + link gửi có kèm `/status/<số>` không |
+| Video resolve "OK" nhưng bot bảo DUP link khác | Cùng nhánh so URL ở trên: khớp nhầm một hàng chưa-FAILED có cùng `url` (getxbot từng trả URL sai cho link khác). Chữa: xoá hàng bị khớp nhầm trong Sheet rồi gửi lại link |
 
 ## 10b. Kiểm tra GAS
 
@@ -302,11 +302,12 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
    với status đó → kỳ vọng nhận “đã có trong hàng đợi/đã upload”, Sheet
    không tạo row mới.
    - **Giới hạn cần biết**: `isQueuedOrRecent` khớp theo cột L `media_key`
-     trước, chỉ fallback sang so URL khi row không có `media_key`. Row tạo
-     *trước* khi có cột này mà tin nhắn đến **có** `statusId` ⇒ không khớp
-     theo status được, chỉ còn fallback URL ⇒ có thể tạo job trùng nếu
-     getxbot từng trả URL khác. Gặp hiện tượng này thì kiểm cột L của row
-     cũ: trống = hàng legacy, xoá row DUP rồi gửi lại link.
+     **chỉ khi tin nhắn đến có `statusId`** (`/status/<số>`); chỉ khi tin
+     nhắn đến KHÔNG trích được `statusId` mới so URL — bất kể row có cột L
+     hay không. Hệ quả: row legacy (cột L trống) + tin nhắn đến **có**
+     `statusId` ⇒ không nhánh nào khớp ⇒ **chắc chắn** tạo job trùng (không
+     có fallback URL cho ca này). Cách chữa: điền cột L của row cũ = status
+     id của video đó — gửi lại link không giúp gì vì cột L vẫn trống.
 3. **Kiểm tra cap 10 job/ngày**: thêm tay 10 row có `created_at` = hôm nay →
    gửi 1 link mới → kỳ vọng nhận “⛔ Hôm nay đã đủ 10 job” và Sheet
    không thêm row mới.
