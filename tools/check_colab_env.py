@@ -45,9 +45,8 @@ def main() -> int:
     pins = parse_pins(PINS_FILE.read_text(encoding="utf-8"))
     problems = check(installed_versions(pins), pins)
     if problems:
-        print("Version Colab lệch với requirements-colab.txt:", file=sys.stderr)
         for p in problems:
-            print(f"  - {p}", file=sys.stderr)
+            print(f"::error::{p}")
         print(
             "Cài lại: pip install -r requirements.txt -r requirements-colab.txt",
             file=sys.stderr,

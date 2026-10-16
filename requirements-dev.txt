@@ -1,3 +1,4 @@
 -r requirements.txt
+-r requirements-colab.txt
 pytest>=8.4
 pytest-asyncio>=0.24

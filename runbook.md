@@ -81,7 +81,7 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
 
 1. Trên máy local:
    ```bash
-   pip install google-colab-cli   # trong .venv (xem quy tắc đầu file)
+   .venv/bin/pip install -r requirements.txt -r requirements-colab.txt
    colab version
    colab whoami
    ```
@@ -219,10 +219,10 @@ không bị đụng tới, vẫn chạy làm backup. Bot mới chỉ chấp nh�
 
 ### a) Smoke 100MB qua local controller
 
-> Yêu cầu local: `.venv` + `pip install -r requirements.txt` (quy tắc đầu file) +
-> `google-colab-cli` đã mint
-> `COLAB_TOKEN_JSON`. Worker chạy trên Colab VM — máy local chỉ cần gspread
-> (controller) + `google-colab-cli`.
+> Yêu cầu local: `.venv` + `pip install -r requirements.txt -r requirements-colab.txt` (quy tắc đầu file) +
+> `COLAB_TOKEN_JSON` đã mint
+> (runbook §3b). Worker chạy trên Colab VM — máy local chỉ cần gspread
+> (controller) + colab CLI.
 
 ```bash
 # Điền .env từ template: cp .env.example .env (biến liệt kê đầy đủ kèm hướng dẫn từng biến)
