@@ -280,6 +280,8 @@ python -m controller.colab_dispatch
 | `ffprobe`/`ffmpeg` thiếu trên VM | VM Colab có sẵn `ffprobe`; validate fail → kiểm tra source file có video stream không |
 | Exit code 1 (Actions đỏ) | Lỗi tạm thời — không can thiệp, sweep tự RETRY |
 | Exit code 2 (Actions đỏ) | Lỗi vĩnh viễn — xem cột error trên Sheet |
+| Burst tin nhắn → run bị `cancelled`, chỉ 1 job chạy | `concurrency.queue` mặc định `single` chỉ giữ 1 run pending và huỷ run pending cũ → đã đặt `queue: max` cho phép tối đa 100 run pending xử lý FIFO |
+| GitHub báo lỗi validation ở `concurrency` | `queue: max` không dùng chung được với `cancel-in-progress: true` ⇒ kiểm tra workflow có vô tình bật `cancel-in-progress: true` |
 | Bootstrap `TypeError: json.loads() arg 1 must be str, bytes or bytearray, not dict` | Đã fix: bootstrap encode dict thành JSON string trước khi nhét env; KHÔNG double-encode |
 | `KeyError: WORKER_REPO` | Chưa set variable `WORKER_REPO` trong Settings → Variables |
 | HTTP 416 / chunk rỗng ở cuối file | File đúng bội số 256MB → EOF guard: worker tự assemble; nếu part non-empty ở EOF → ghép; nếu part rỗng → transient retry |

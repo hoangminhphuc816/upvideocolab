@@ -11,9 +11,13 @@ on:
         options: [worker, sweep]
         default: worker
 
+# queue: max (GitHub Actions ≥ 2026-05-07): mặc định "single" chỉ giữ 1 run pending và
+# HUỶ run pending cũ khi có run mới ⇒ burst tin nhắn làm mất dispatch (job phải chờ sweep 2h).
+# max: tối đa 100 run pending, xử lý FIFO. Không dùng chung được với cancel-in-progress: true.
 concurrency:
   group: video-worker
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
