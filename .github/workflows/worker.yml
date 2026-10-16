@@ -23,7 +23,7 @@ jobs:
     if: >-
       github.event_name == 'repository_dispatch' ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'worker')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
       WORKER_REPO: ${{ vars.WORKER_REPO }}
@@ -38,22 +38,24 @@ jobs:
       TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Cài dependencies + Colab CLI
         run: |
           pip install -r requirements.txt
-          # colab-cli 0.6.0 cần CẢ 'KernelClient' VÀ 'JupyterSubprotocol' từ
-          # jupyter_kernel_client — cả hai chỉ tồn tại ở 0.9.0–0.15.0
-          # (0.7.x thiếu Subprotocol, 1.0.x bỏ KernelClient). Pin 0.15.0.
-          pip install "jupyter-kernel-client==0.15.0" google-colab-cli
+          # Ghim CẢ HAI: google-colab-cli 0.7.x ghim jupyter-kernel-client
+          # (0.7.2→==0.8, 0.7.4→==0.9.0) nên nếu chỉ ghim jkc==0.15.0 thì pip
+          # thoả-hiệp bằng cách lùi về 0.6.0 (bản không ghim jkc) — đúng như log
+          # CI đang in "current: 0.6.0". Ghim tường minh cho tất định; muốn lên
+          # 0.7.4 thì phải đổi cả cặp (jkc==0.9.0) và chạy thử 1 job thật.
+          pip install "jupyter-kernel-client==0.15.0" "google-colab-cli==0.6.0"
       - name: Dispatch job lên Colab VM (worker chạy trên VM)
         run: python -m controller.colab_dispatch
 
   sweep:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'sweep'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
       WORKER_REPO: ${{ vars.WORKER_REPO }}
@@ -68,14 +70,18 @@ jobs:
       TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Cài dependencies + Colab CLI
         run: |
           pip install -r requirements.txt
-          # Pin như job worker — colab-cli 0.6.0 cần KernelClient + JupyterSubprotocol (0.15.0)
-          pip install "jupyter-kernel-client==0.15.0" google-colab-cli
+          # Ghim CẢ HAI: google-colab-cli 0.7.x ghim jupyter-kernel-client
+          # (0.7.2→==0.8, 0.7.4→==0.9.0) nên nếu chỉ ghim jkc==0.15.0 thì pip
+          # thoả-hiệp bằng cách lùi về 0.6.0 (bản không ghim jkc) — đúng như log
+          # CI đang in "current: 0.6.0". Ghim tường minh cho tất định; muốn lên
+          # 0.7.4 thì phải đổi cả cặp (jkc==0.9.0) và chạy thử 1 job thật.
+          pip install "jupyter-kernel-client==0.15.0" "google-colab-cli==0.6.0"
       - name: Sweep job treo (trên runner — chỉ Sheet + notify)
         run: python -m worker.main --sweep
       - name: Xử lý job PENDING/RETRY còn lại (watchdog → Colab VM)
