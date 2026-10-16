@@ -102,7 +102,7 @@ async def run_once(cfg: Config) -> int:
                     break
             path = assemble(cfg.dl_dir)
         else:
-            path, _size = download_to_file(job.url, cfg.dl_dir)
+            path, _size = download_to_file(job.url, cfg.dl_dir, on_progress=on_progress)
             queue.set_checkpoint(job.job_id, "dl:full")
         validate_video(path)
 

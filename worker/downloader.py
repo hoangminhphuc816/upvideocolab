@@ -21,9 +21,13 @@ class DownloadError(Exception):
 
 
 def _total_bytes(resp) -> int | None:
-    raw = resp.headers.get("Content-Length")
+    raw = resp.headers.get("Content-Range") or resp.headers.get("Content-Length")
+    if not raw:
+        return None
     try:
-        return int(raw) if raw else None
+        if raw.startswith("bytes "):
+            return int(raw.split("/")[-1])
+        return int(raw)
     except ValueError:
         return None
 
@@ -84,7 +88,8 @@ def assemble(dest_dir: str) -> str:
     return str(out)
 
 
-def download_to_file(url: str, dest_dir: str, max_bytes: int = TELEGRAM_MAX) -> tuple[str, int]:
+def download_to_file(url: str, dest_dir: str, max_bytes: int = TELEGRAM_MAX,
+                    on_progress=None) -> tuple[str, int]:
     os.makedirs(dest_dir, exist_ok=True)
     path = Path(dest_dir) / "video.mp4"
     try:
@@ -109,6 +114,7 @@ def download_to_file(url: str, dest_dir: str, max_bytes: int = TELEGRAM_MAX) -> 
         if declared_len > max_bytes:
             raise DownloadError(f"file vượt giới hạn 2GB: {declared_len} bytes")
 
+    t0 = time.monotonic()
     size = 0
     try:
         with open(path, "wb") as f:
@@ -119,6 +125,11 @@ def download_to_file(url: str, dest_dir: str, max_bytes: int = TELEGRAM_MAX) -> 
                 if size > max_bytes:
                     raise DownloadError(f"file vượt giới hạn 2GB giữa luồng: {size} bytes")
                 f.write(chunk)
+                if on_progress is not None:
+                    try:
+                        on_progress(size, _total_bytes(resp), time.monotonic() - t0)
+                    except Exception:
+                        log.exception("on_progress lỗi (bỏ qua)")
     except DownloadError:
         path.unlink(missing_ok=True)
         raise

@@ -204,6 +204,9 @@ async def test_run_once_chunked_resume_flow(tmp_path):
         call("https://x/v.mp4", start=0, dest_dir=str(tmp_path), on_progress=ANY),
         call("https://x/v.mp4", start=CHUNK_SIZE, dest_dir=str(tmp_path), on_progress=ANY),
     ]
+    cb = dc.call_args_list[0].kwargs["on_progress"]
+    cb(CHUNK_SIZE, CHUNK_SIZE + 10, 0.1)
+    q.touch.assert_called_with("JOB-1")
     assert q.set_checkpoint.call_args_list == [
         call("JOB-1", f"dl:{CHUNK_SIZE}"),
         call("JOB-1", f"dl:{CHUNK_SIZE + 10}"),
@@ -229,6 +232,9 @@ async def test_run_once_no_range_fallback_full_download(tmp_path):
     assert rc == 0
     dl.assert_called_once()
     dc.assert_not_called()
+    cb = dl.call_args.kwargs["on_progress"]
+    cb(1, 2, 0.1)
+    q.touch.assert_called_with("JOB-1")
     q.set_checkpoint.assert_called_with("JOB-1", "dl:full")
 
 
@@ -298,6 +304,9 @@ async def test_run_once_chunked_reset_retry_once_then_success(tmp_path):
         call("https://x/v.mp4", start=100, dest_dir=str(tmp_path), on_progress=ANY),
         call("https://x/v.mp4", start=0, dest_dir=str(tmp_path), on_progress=ANY),
     ]
+    cb = dc.call_args_list[0].kwargs["on_progress"]
+    cb(1, 2, 0.1)
+    q.touch.assert_called_with("JOB-1")
     q.set_checkpoint.assert_any_call("JOB-1", "dl:0")
     q.set_checkpoint.assert_any_call("JOB-1", "dl:50")
 
