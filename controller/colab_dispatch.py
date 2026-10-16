@@ -96,8 +96,9 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
         return 0
     if job.status not in STATUSES:
         _annotate("warning", f"{job_id}: colab run exit {returncode}, "
-                             f"Sheet status lạ '{job.status}' — bỏ qua ghi error, "
-                             f"sweep sẽ xử lý sau nếu còn in-flight")
+                             f"Sheet status lạ '{job.status}' — bỏ qua ghi error; "
+                             f"cần sửa tay cột status (sweep chỉ xử lý "
+                             f"CLAIMED/DOWNLOADING/UPLOADING)")
         return 0
     if not job.error:
         queue.set_status(

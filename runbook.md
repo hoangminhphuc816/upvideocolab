@@ -301,6 +301,12 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
    `updated_at` = hôm nay, `media_key` = 1 status id thật → gửi link ứng
    với status đó → kỳ vọng nhận “đã có trong hàng đợi/đã upload”, Sheet
    không tạo row mới.
+   - **Giới hạn cần biết**: `isQueuedOrRecent` khớp theo cột L `media_key`
+     trước, chỉ fallback sang so URL khi row không có `media_key`. Row tạo
+     *trước* khi có cột này mà tin nhắn đến **có** `statusId` ⇒ không khớp
+     theo status được, chỉ còn fallback URL ⇒ có thể tạo job trùng nếu
+     getxbot từng trả URL khác. Gặp hiện tượng này thì kiểm cột L của row
+     cũ: trống = hàng legacy, xoá row DUP rồi gửi lại link.
 3. **Kiểm tra cap 10 job/ngày**: thêm tay 10 row có `created_at` = hôm nay →
    gửi 1 link mới → kỳ vọng nhận “⛔ Hôm nay đã đủ 10 job” và Sheet
    không thêm row mới.
