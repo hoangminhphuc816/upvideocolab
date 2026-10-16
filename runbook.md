@@ -332,8 +332,12 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
   lần; log không reset nó).
 - **Tại sao không dài hơn vô hạn**: mục tiêu là job thường xuyên hoàn thành
   trong hạn; chính sách giữ session ngắn để giảm rủi ro anti-abuse.
-- **Cách đổi**: chỉ đổi env `COLAB_RUN_TIMEOUT_S` trong `.env` hoặc GitHub
-  Actions env; **không sửa code**.
+- **Cách đổi**: chỉ đổi env `COLAB_RUN_TIMEOUT_S`; **không sửa code**.
+  Chạy local: đặt biến trong `.env`/shell trước khi chạy
+  `.venv/bin/python -m controller.colab_dispatch`.
+  Trên GitHub Actions: thêm 1 dòng vào block `env:` của job `worker` (và `sweep`
+  nếu muốn) trong `.github/workflows/worker.yml`, ví dụ `COLAB_RUN_TIMEOUT_S: "7200"`
+  — workflow lấy env từ block này, không đọc `.env`.
 - **Residual**: job quá lớn không xong trong hạn vẫn sẽ tốn tối đa **4 session**
   Colab rồi FAILED (1 lượt đầu + 3 retry, `max_retries=3`). Nếu gặp thường xuyên: cân nhắc giảm
   chất lượng đầu vào, cắt video nhỏ hơn, hoặc chốt nguồn URL thân thiện
