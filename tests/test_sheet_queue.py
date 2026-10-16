@@ -163,6 +163,24 @@ def test_sweep_uses_created_at_when_updated_at_empty():
     assert failed == []
 
 
+def test_touch_lam_moi_updated_at_va_khong_doi_status():
+    rows = [HDR, ["JOB-1", "DOWNLOADING", "u1", "42", "100", "100", "w", "", "", "0", "0"]]
+    q = q_with(rows, now_ts=1000)
+    q.touch("JOB-1")
+    row = q.sheet.rows[1]
+    assert row[1] == "DOWNLOADING"
+    assert row[5] == "1000"
+    assert row[9] == "0"
+
+
+def test_sweep_khong_cuop_job_vua_duoc_touch():
+    now = 2000000
+    rows = [HDR, ["JOB-1", "DOWNLOADING", "u1", "42", "100", str(now), "w", "", "", "0", "0"]]
+    q = q_with(rows, now_ts=now)
+    assert q.sweep_stale(older_than_min=15) == []
+    assert q.sheet.rows[1][1] == "DOWNLOADING"
+
+
 def test_append_job_creates_pending_row():
     q = q_with([HDR], now_ts=1234)
     job_id = q.append_job("https://x/v.mp4", 42, job_id="JOB-X")

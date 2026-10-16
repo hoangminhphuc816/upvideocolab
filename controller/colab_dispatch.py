@@ -25,8 +25,10 @@ from worker.sheet_queue import SheetQueue
 
 TOKEN_PATH = Path.home() / ".config" / "colab-cli" / "token.json"
 HISTORY_DIR = Path.home() / ".config" / "colab-cli" / "history"
-# Timeout kernel im lặng của colab run — iopub liên tục sẽ reset; 1h an toàn
-COLAB_RUN_TIMEOUT_S = "3600"
+# `--timeout` của `colab run` là HẠN TUYỆT ĐỐI cho cả cell (jupyter_kernel_client
+# wsclient.py: deadline = monotonic() + timeout). In log KHÔNG gia hạn nó.
+# Giá trị thật lấy từ env; Task 7 chốt chính sách.
+COLAB_RUN_TIMEOUT_S = os.environ.get("COLAB_RUN_TIMEOUT_S", "3600")
 
 _REQUIRED_ENV_KEYS = (
     "TELETHON_SESSION",

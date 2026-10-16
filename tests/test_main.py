@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, ANY, call, patch
 
 import pytest
 
@@ -201,8 +201,8 @@ async def test_run_once_chunked_resume_flow(tmp_path):
         rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
     assert rc == 0
     assert dc.call_args_list == [
-        call("https://x/v.mp4", start=0, dest_dir=str(tmp_path)),
-        call("https://x/v.mp4", start=CHUNK_SIZE, dest_dir=str(tmp_path)),
+        call("https://x/v.mp4", start=0, dest_dir=str(tmp_path), on_progress=ANY),
+        call("https://x/v.mp4", start=CHUNK_SIZE, dest_dir=str(tmp_path), on_progress=ANY),
     ]
     assert q.set_checkpoint.call_args_list == [
         call("JOB-1", f"dl:{CHUNK_SIZE}"),
@@ -295,8 +295,8 @@ async def test_run_once_chunked_reset_retry_once_then_success(tmp_path):
         rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
     assert rc == 0
     assert dc.call_args_list == [
-        call("https://x/v.mp4", start=100, dest_dir=str(tmp_path)),
-        call("https://x/v.mp4", start=0, dest_dir=str(tmp_path)),
+        call("https://x/v.mp4", start=100, dest_dir=str(tmp_path), on_progress=ANY),
+        call("https://x/v.mp4", start=0, dest_dir=str(tmp_path), on_progress=ANY),
     ]
     q.set_checkpoint.assert_any_call("JOB-1", "dl:0")
     q.set_checkpoint.assert_any_call("JOB-1", "dl:50")

@@ -154,6 +154,15 @@ class SheetQueue:
         if error:
             self.sheet.update_cell(row, self._col["error"], str(error)[:500])
 
+    def touch(self, job_id: str) -> None:
+        """Làm mới updated_at để sweep không coi job đang chạy là stale.
+
+        Chỉ ghi 1 ô, KHÔNG đổi status và KHÔNG tăng retry_count.
+        """
+        row = self._row_by_job_id(job_id)
+        if row is not None:
+            self.sheet.update_cell(row, self._col["updated_at"], str(self._now_ts()))
+
     def record_message_id(self, job_id: str, msg_id: int) -> None:
         row = self._row_by_job_id(job_id)
         if row is not None:

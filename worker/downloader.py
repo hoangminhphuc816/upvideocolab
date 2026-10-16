@@ -1,8 +1,10 @@
 """Tải MP4 streaming bằng requests + validate bằng ffprobe."""
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import requests
@@ -11,9 +13,19 @@ import requests
 TELEGRAM_MAX = 2 * 1024**3 - 512 * 1024
 CHUNK_SIZE = 256 * 1024 * 1024  # 256MB/chunk — session ngắn tự nhiên
 
+log = logging.getLogger("worker")
+
 
 class DownloadError(Exception):
     pass
+
+
+def _total_bytes(resp) -> int | None:
+    raw = resp.headers.get("Content-Length")
+    try:
+        return int(raw) if raw else None
+    except ValueError:
+        return None
 
 
 def probe_range_support(url: str) -> bool:
@@ -24,7 +36,8 @@ def probe_range_support(url: str) -> bool:
     return r.status_code == 200 and "bytes" in (r.headers.get("Accept-Ranges", "").lower())
 
 
-def download_chunk(url: str, start: int, dest_dir: str, chunk_size: int = CHUNK_SIZE) -> tuple[str, int]:
+def download_chunk(url: str, start: int, dest_dir: str, chunk_size: int = CHUNK_SIZE,
+                   on_progress=None) -> tuple[str, int]:
     os.makedirs(dest_dir, exist_ok=True)
     part = Path(dest_dir) / "video.part"
     actual = part.stat().st_size if part.exists() else 0
@@ -40,6 +53,7 @@ def download_chunk(url: str, start: int, dest_dir: str, chunk_size: int = CHUNK_
     if resp.status_code != 206:
         raise DownloadError(f"server không trả 206 cho Range (HTTP {resp.status_code}) — nguồn không hỗ trợ resume")
     got = 0
+    t0 = time.monotonic()
     try:
         with open(part, "ab") as f:
             for chunk in resp.iter_content(1024 * 1024):
@@ -48,6 +62,11 @@ def download_chunk(url: str, start: int, dest_dir: str, chunk_size: int = CHUNK_
                     if start + got > TELEGRAM_MAX:
                         raise DownloadError(f"file vượt giới hạn 2GB: {start + got} bytes")
                     f.write(chunk)
+                    if on_progress is not None:
+                        try:
+                            on_progress(start + got, _total_bytes(resp), time.monotonic() - t0)
+                        except Exception:
+                            log.exception("on_progress lỗi (bỏ qua)")
     except (requests.RequestException, OSError) as e:
         raise DownloadError(f"mất kết nối giữa chừng (chunk @{start}): {e}") from None
     if got == 0:

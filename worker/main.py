@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import threading
+import time
 
 from worker.config import Config, SWEEP_REQUIRED, load_config
 from worker.downloader import CHUNK_SIZE, DownloadError, download_chunk, download_to_file, probe_range_support, assemble, validate_video
@@ -56,13 +57,27 @@ async def run_once(cfg: Config) -> int:
     part = None
     try:
         queue.set_status(job.job_id, "DOWNLOADING")
+        last_log = last_touch = 0.0
+
+        def on_progress(done: int, total: int | None, elapsed: float) -> None:
+            nonlocal last_log, last_touch
+            now = time.monotonic()
+            if now - last_log >= 15:
+                last_log = now
+                pct = f"{done * 100 // total}%" if total else "?"
+                log.info("download %s: %d/%s byte (%s)", job.job_id, done, total or "?", pct)
+            if now - last_touch >= 300:
+                last_touch = now
+                queue.touch(job.job_id)
+
         if probe_range_support(job.url):
             start = checkpoint_dl_bytes(job)
             entry_checkpoint = start
             retried_reset = False
             while True:
                 try:
-                    part, got = download_chunk(job.url, start=start, dest_dir=cfg.dl_dir)
+                    part, got = download_chunk(job.url, start=start, dest_dir=cfg.dl_dir,
+                                               on_progress=on_progress)
                 except DownloadError as e:
                     msg = str(e)
                     if not retried_reset and "cần reset checkpoint" in msg:
