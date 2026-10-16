@@ -9,8 +9,22 @@
 > pip install telethon   # hoặc: pip install -r requirements.txt
 > ```
 >
-> Mọi lệnh `pip install` trong runbook này hiểu là chạy trong `.venv` đã
-> activate. Thoát môi trường: `deactivate`.
+Mọi lệnh `pip install` trong runbook này hiểu là chạy trong `.venv` đã
+activate. Thoát môi trường: `deactivate`.
+
+## 0. Cài đặt local (venv + Colab pins)
+
+> **Lưu ý**: `.venv` cũ có thể đang chứa `jupyter-kernel-client 1.0.2` (lệch với CI).
+> Nếu lần đầu chạy, xoá `.venv` cũ và tạo lại để khớp chính xác môi trường CI.
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt -r requirements-colab.txt
+.venv/bin/python tools/check_colab_env.py   # phải in "OK: google-colab-cli==0.6.0, jupyter-kernel-client==0.15.0"
+```
+
+Version cặp Colab CLI + `jupyter-kernel-client` **chỉ khai ở `requirements-colab.txt`**.
+CI và local đều dùng chung file này; không ghim inline nữa.
 
 ## 1. Kênh Telegram riêng tư + ID
 

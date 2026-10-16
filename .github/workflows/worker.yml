@@ -43,13 +43,8 @@ jobs:
           python-version: "3.12"
       - name: Cài dependencies + Colab CLI
         run: |
-          pip install -r requirements.txt
-          # Ghim CẢ HAI: google-colab-cli 0.7.x ghim jupyter-kernel-client
-          # (0.7.2→==0.8, 0.7.4→==0.9.0) nên nếu chỉ ghim jkc==0.15.0 thì pip
-          # thoả-hiệp bằng cách lùi về 0.6.0 (bản không ghim jkc) — đúng như log
-          # CI đang in "current: 0.6.0". Ghim tường minh cho tất định; muốn lên
-          # 0.7.4 thì phải đổi cả cặp (jkc==0.9.0) và chạy thử 1 job thật.
-          pip install "jupyter-kernel-client==0.15.0" "google-colab-cli==0.6.0"
+          pip install -r requirements.txt -r requirements-colab.txt
+          python tools/check_colab_env.py
       - name: Dispatch job lên Colab VM (worker chạy trên VM)
         run: python -m controller.colab_dispatch
 
@@ -75,13 +70,8 @@ jobs:
           python-version: "3.12"
       - name: Cài dependencies + Colab CLI
         run: |
-          pip install -r requirements.txt
-          # Ghim CẢ HAI: google-colab-cli 0.7.x ghim jupyter-kernel-client
-          # (0.7.2→==0.8, 0.7.4→==0.9.0) nên nếu chỉ ghim jkc==0.15.0 thì pip
-          # thoả-hiệp bằng cách lùi về 0.6.0 (bản không ghim jkc) — đúng như log
-          # CI đang in "current: 0.6.0". Ghim tường minh cho tất định; muốn lên
-          # 0.7.4 thì phải đổi cả cặp (jkc==0.9.0) và chạy thử 1 job thật.
-          pip install "jupyter-kernel-client==0.15.0" "google-colab-cli==0.6.0"
+          pip install -r requirements.txt -r requirements-colab.txt
+          python tools/check_colab_env.py
       - name: Sweep job treo (trên runner — chỉ Sheet + notify)
         run: python -m worker.main --sweep
       - name: Xử lý job PENDING/RETRY còn lại (watchdog → Colab VM)

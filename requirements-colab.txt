@@ -1,0 +1,13 @@
+# Cặp version cho google-colab-cli + jupyter-kernel-client — CHỈ KHAI Ở ĐÂY.
+# CI (2 job trong .github/workflows/worker.yml) và .venv local đều cài từ file này.
+#
+# Vì sao ghim tường minh CẢ HAI:
+#   - google-colab-cli 0.7.4 (mới nhất) ghim cứng "jupyter-kernel-client==0.9.0"
+#     ⇒ không thể dùng jkc mới hơn cùng 0.7.x.
+#   - 0.6.0 KHÔNG ghim jkc ⇒ nếu không ghim ở đây, pip lấy bản mới nhất và mỗi máy
+#     một version (đúng lỗi đã xảy ra: .venv có 1.0.2, CI có 0.15.0).
+#   - `--timeout` của `colab run` là hạn tuyệt đối như nhau ở 0.9.0/0.15.0/1.0.2
+#     (đã đọc source wsclient.py cả 3 bản), nên chọn 0.15.0 vì trùng môi trường
+#     đang chạy production, không đổi hành vi.
+jupyter-kernel-client==0.15.0
+google-colab-cli==0.6.0
