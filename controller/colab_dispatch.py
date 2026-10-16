@@ -5,9 +5,10 @@ Exit-code semantics:
   worker.main) VÀ dùng non-zero cho lỗi của chính CLI ⇒ exit code một mình
   không phân biệt được "job lỗi" với "đường dispatch hỏng".
 - Vì vậy sau khi CLI kết thúc, controller đọc lại dòng job trên Sheet (nguồn
-  sự thật) rồi mới quyết định: chỉ trả non-zero khi worker CHƯA TỪNG claim
-  job (dispatch thật sự hỏng). Job lỗi vĩnh viễn / VM dừng giữa chừng đã được
-  worker ghi Sheet + notify owner ⇒ CI xanh kèm annotation `::warning::`.
+  sự thật) rồi mới quyết định: chỉ trả non-zero khi worker của LƯỢT NÀY
+  không claim được job (dispatch thật sự hỏng). Job lỗi vĩnh viễn / VM dừng
+  giữa chừng đã được worker ghi Sheet + notify owner ⇒ CI xanh kèm annotation
+  `::warning::`.
 """
 from __future__ import annotations
 
@@ -42,6 +43,11 @@ _REQUIRED_ENV_KEYS = (
 def _materialize_token(colab_token_json: str) -> None:
     TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
     TOKEN_PATH.write_text(colab_token_json)
+    # Settings là pydantic model có default cho mọi field ⇒ ghi thiếu field vẫn
+    # hợp lệ. Tắt update-check cho log CI sạch + bớt 1 request mạng mỗi lần chạy.
+    (TOKEN_PATH.parent / "settings.json").write_text(
+        json.dumps({"enable_update_check": False})
+    )
 
 
 def _annotate(level: str, message: str) -> None:
@@ -49,12 +55,14 @@ def _annotate(level: str, message: str) -> None:
     print(f"::{level}::{message}", flush=True)
 
 
-def _classify_run(queue: SheetQueue, job_id: str, returncode: int) -> int:
+def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: int) -> int:
     """Map exit code của `colab run` → exit code của CI (xem docstring đầu file).
 
-    - worker chưa claim job (cột `worker` rỗng) ⇒ không có gì chạy ⇒ đỏ.
-    - worker đã claim ⇒ job-level: DONE/FAILED (đã ghi Sheet + notify) hoặc
-      dở dang (sweep sẽ RETRY sau ≤15 phút) ⇒ xanh + `::warning::`.
+    - worker của lượt này không claim được job (cột `worker` khác `worker_id`)
+      ⇒ không có gì chạy ⇒ đỏ.
+    - worker của lượt này đã claim ⇒ job-level: DONE/FAILED (đã ghi Sheet +
+      notify) hoặc dở dang (sweep sẽ RETRY sau ≤15 phút) ⇒ xanh +
+      `::warning::`.
     """
     if returncode == 0:
         return 0
@@ -62,9 +70,9 @@ def _classify_run(queue: SheetQueue, job_id: str, returncode: int) -> int:
     if job is None:
         _annotate("error", f"{job_id}: colab run exit {returncode}, không đọc được dòng job trên Sheet")
         return 1
-    if not job.worker:
+    if job.worker != worker_id:
         _annotate("error", f"{job_id}: colab run exit {returncode}, Sheet={job.status}, "
-                            "worker chưa claim — dispatch thất bại")
+                            f"worker={job.worker} != {worker_id} — dispatch thất bại")
         return 1
     if job.status in ("DONE", "FAILED"):
         detail = f" ({job.error})" if job.error else ""
@@ -82,13 +90,27 @@ def _write_bootstrap(worker_env: dict[str, str], worker_id: str) -> str:
         **worker_env,
         "WORKER_ID": worker_id,
     }
+    payload_json = json.dumps(json.dumps(payload))
     return f"""\
 import json, os, subprocess, sys
-os.environ.update(json.loads({json.dumps(json.dumps(payload))}))
-subprocess.run([sys.executable, "-m", "pip", "install", "-q",
-    "gspread>=6.0,<7", "telethon==1.45.0", "cryptg", "requests"], check=True)
-subprocess.run(["git", "clone", "--depth", "1",
-    "https://github.com/{repo}.git", "/content/app"], check=True)
+os.environ.update(json.loads({payload_json}))
+
+
+def run(cmd):
+    # capture_output + print: ipykernel chỉ bắt output ở tầng Python, KHÔNG bắt
+    # output tầng fd ⇒ subprocess.run để mặc định làm mất sạch log pip/git trên VM.
+    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    print("$ " + " ".join(cmd), flush=True)
+    print(((proc.stdout or "") + (proc.stderr or ""))[-4000:], flush=True)
+    if proc.returncode != 0:
+        print("[bootstrap] lenh that bai:", proc.returncode, " ".join(cmd), flush=True)
+        sys.exit(1)
+
+
+run([sys.executable, "-m", "pip", "install", "-q",
+     "gspread>=6.0,<7", "telethon==1.45.0", "cryptg", "requests"])
+run(["git", "clone", "--depth", "1",
+     "https://github.com/{repo}.git", "/content/app"])
 sys.path.insert(0, "/content/app")
 from worker.config import load_config
 from worker.main import main as worker_main
@@ -103,14 +125,15 @@ def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json:
     if job is None:
         return 0
 
-    bootstrap = _write_bootstrap(worker_env, os.environ.get("WORKER_ID", os.environ.get("GITHUB_RUN_ID", "local")))
+    worker_id = os.environ.get("WORKER_ID", os.environ.get("GITHUB_RUN_ID", "local"))
+    bootstrap = _write_bootstrap(worker_env, worker_id)
     fd, path = tempfile.mkstemp(suffix=".py", prefix="colab-bootstrap-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(bootstrap)
         cmd = ["colab", "run", "--timeout", COLAB_RUN_TIMEOUT_S, path]
         proc = subprocess.run(cmd, check=False)
-        return _classify_run(queue, job.job_id, proc.returncode)
+        return _classify_run(queue, job.job_id, worker_id, proc.returncode)
     finally:
         try:
             Path(path).unlink()

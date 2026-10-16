@@ -138,11 +138,12 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
      (Task PAT trong §6b) rồi PATCH job qua console (headers → Authorization).
    - Workflow KHÔNG bị tự tắt nữa vì không còn trigger `schedule`.
 5. Run đỏ của `video-controller` đọc thế nào (từ 16-10-2026):
-   - Chỉ step `Xử lý job PENDING/RETRY còn lại (watchdog → Colab VM)` /
-     `Dispatch job lên Colab VM` mới có thể đỏ — đó là `colab_dispatch`.
-   - **Đỏ = dispatch hỏng thật**: worker chưa từng claim job (Sheet còn
-     PENDING/RETRY, cột `worker` rỗng) → job không chạy, cần xem log +
-     annotation `::error::` của run.
+   - Các step khác đỏ thường là lỗi hạ tầng CI (checkout, pip, sweep); riêng 2
+     step dispatch (`Xử lý job PENDING/RETRY còn lại (watchdog → Colab VM)` /
+     `Dispatch job lên Colab VM`) có thể đỏ theo nghĩa mô tả ở dưới.
+   - **Đỏ = dispatch hỏng thật**: worker của lượt này không claim được job
+     (Sheet vẫn PENDING/RETRY, cột `worker` khác `WORKER_ID`) → job không
+     chạy, cần xem log + annotation `::error::` của run.
    - **Xanh kèm `::warning::` = job lỗi ở tầng job** (Sheet FAILED, hoặc VM
      dừng giữa chừng để sweep RETRY). Chi tiết lỗi nằm ở cột `error` trên
      Sheet + tin `[FAIL]` Telegram — không phải trên GitHub.

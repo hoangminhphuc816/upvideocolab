@@ -1,4 +1,9 @@
-"""Google Sheet làm job queue: append, claim verify-after-write, sweep stale."""
+"""Google Sheet làm job queue: append, claim verify-after-write, sweep stale.
+
+Cột `worker` ghi worker_id của attempt hiện tại đang xử lý job; KHÔNG phải
+"đã từng có ai claim". `sweep_stale` đặt status=RETRY nhưng KHÔNG xoá cột
+`worker`, nên không dùng "cột rỗng" làm dấu hiệu "chưa từng bị claim".
+"""
 from __future__ import annotations
 
 import json

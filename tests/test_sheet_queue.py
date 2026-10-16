@@ -195,6 +195,21 @@ def test_checkpoint_parse_roundtrip():
     assert checkpoint_dl_bytes(job) == 268435456
 
 
+def test_get_job_returns_fresh_values_after_mutation():
+    rows = [HDR, ["JOB-1", "PENDING", "u", "42", "100", "", "", "", "", "0", "0"]]
+    q = q_with(rows)
+    first = q.get_job("JOB-1")
+    assert first.status == "PENDING"
+    assert first.worker == ""
+    q.sheet.rows[1][1] = "DOWNLOADING"
+    q.sheet.rows[1][6] = "worker-a"
+    q.sheet.rows[1][8] = "timeout"
+    second = q.get_job("JOB-1")
+    assert second.status == "DOWNLOADING"
+    assert second.worker == "worker-a"
+    assert second.error == "timeout"
+
+
 def test_checkpoint_invalid_returns_zero():
     from worker.sheet_queue import checkpoint_dl_bytes
     job = Job("J", "PENDING", "u", 42, 1, None, "", None, "", 0, "rubbish", 2)

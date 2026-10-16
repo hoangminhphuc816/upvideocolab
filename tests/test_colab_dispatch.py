@@ -1,10 +1,11 @@
 from unittest.mock import MagicMock, patch
 
+import json
 import types
 import pytest
 
 from worker.config import Config
-from controller.colab_dispatch import _write_bootstrap, dispatch_to_colab
+from controller.colab_dispatch import _write_bootstrap, _materialize_token, dispatch_to_colab
 
 
 def make_cfg():
@@ -44,6 +45,24 @@ def test_write_bootstrap_includes_env_worker_id_and_repo_excludes_token(monkeypa
     assert env_copy["TELETHON_SESSION"] == "sess"
     assert env_copy["WORKER_ID"] == "colab-abc123"
     assert "COLAB_TOKEN_JSON" not in env_copy
+
+
+def test_write_bootstrap_captures_subprocess_output(monkeypatch):
+    """Output của pip/git phải được in ở tầng Python, nếu không ipykernel nuốt mất
+    (không bắt được output tầng fd) → log CI trống, không chẩn đoán được."""
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
+    assert "capture_output=True" in src
+    assert "print(" in src
+
+
+def test_materialize_token_writes_settings(tmp_path):
+    """settings.json phải được ghi cùng token để tắt update-check trong CI."""
+    token = tmp_path / ".config" / "colab-cli" / "token.json"
+    with patch("controller.colab_dispatch.TOKEN_PATH", token):
+        _materialize_token("{tok}")
+    settings = token.parent / "settings.json"
+    assert json.loads(settings.read_text()) == {"enable_update_check": False}
 
 
 def test_dispatch_no_job_returns_zero_without_colab(tmp_path, monkeypatch):
@@ -110,6 +129,23 @@ def test_dispatch_worker_never_claimed_is_red(tmp_path, monkeypatch, capsys):
     q = MagicMock()
     q.next_job.return_value = MagicMock(job_id="JOB-1", status="PENDING", url="u")
     q.get_job.return_value = MagicMock(status="PENDING", worker="", error="")
+    run = MagicMock(return_value=MagicMock(returncode=1))
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run", run), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
+    assert rc == 1
+    assert "::error::JOB-1" in capsys.readouterr().out
+
+
+def test_dispatch_retry_with_stale_worker_is_red(tmp_path, monkeypatch, capsys):
+    """Job bị sweep về RETRY nhưng cột worker vẫn giữ id của run CŨ ⇒ lượt này
+    không claim được job ⇒ dispatch hỏng ⇒ phải ĐỎ (không được false-green)."""
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    monkeypatch.setenv("WORKER_ID", "override-worker")
+    q = MagicMock()
+    q.next_job.return_value = MagicMock(job_id="JOB-1", status="RETRY", url="u")
+    q.get_job.return_value = MagicMock(status="RETRY", worker="colab-old-run", error="")
     run = MagicMock(return_value=MagicMock(returncode=1))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run", run), \
