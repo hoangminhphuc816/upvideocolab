@@ -18,17 +18,26 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from worker.config import Config
 from worker.sheet_queue import SheetQueue
 
 TOKEN_PATH = Path.home() / ".config" / "colab-cli" / "token.json"
 HISTORY_DIR = Path.home() / ".config" / "colab-cli" / "history"
-# `--timeout` của `colab run` là HẠN TUYỆT ĐỐI cho cả cell (jupyter_kernel_client
-# wsclient.py: deadline = monotonic() + timeout). In log KHÔNG gia hạn nó.
-# Giá trị thật lấy từ env; Task 7 chốt chính sách.
 COLAB_RUN_TIMEOUT_S = os.environ.get("COLAB_RUN_TIMEOUT_S", "3600")
+
+TZ_VN = "Asia/Ho_Chi_Minh"  # UTC+7, không có DST
+DAILY_UPLOAD_LIMIT = int(os.environ.get("DAILY_UPLOAD_LIMIT", "4"))
+
+
+def day_start_epoch(now: float | None = None) -> int:
+    """Epoch (giây) của 00:00 hôm nay theo giờ VN."""
+    tz = ZoneInfo(TZ_VN)
+    cur = datetime.fromtimestamp(now, tz) if now is not None else datetime.now(tz)
+    return int(cur.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
 
 _REQUIRED_ENV_KEYS = (
     "TELETHON_SESSION",
@@ -125,6 +134,14 @@ def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json:
     queue = SheetQueue(cfg)
     job = queue.next_job()
     if job is None:
+        return 0
+
+    done_today = queue.count_done_since(day_start_epoch())
+    if done_today >= DAILY_UPLOAD_LIMIT:
+        print(
+            f"::notice::Đã đủ {done_today}/{DAILY_UPLOAD_LIMIT} upload hôm nay (giờ VN) — "
+            f"không tạo session Colab; job {job.job_id} ở lại hàng đợi cho mai."
+        )
         return 0
 
     worker_id = os.environ.get("WORKER_ID", os.environ.get("GITHUB_RUN_ID", "local"))

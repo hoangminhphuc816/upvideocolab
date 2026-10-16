@@ -19,7 +19,7 @@ from worker.config import Config
 COLUMNS = ["job_id", "status", "url", "chat_id", "created_at", "updated_at",
            "worker", "msg_id", "error", "retry_count", "checkpoint"]
 STATUSES = ["PENDING", "CLAIMED", "DOWNLOADING", "UPLOADING", "DONE", "FAILED", "RETRY"]
-SWEEPABLE = ("PENDING", "CLAIMED", "DOWNLOADING", "UPLOADING")
+SWEEPABLE = ("CLAIMED", "DOWNLOADING", "UPLOADING")  # PENDING = chưa từng thử ⇒ không phải stale
 
 
 @dataclass
@@ -172,6 +172,20 @@ class SheetQueue:
         row = self._row_by_job_id(job_id)
         if row is not None:
             self.sheet.update_cell(row, self._col["checkpoint"], value)
+
+    def count_done_since(self, ts: int) -> int:
+        """Đếm job DONE có updated_at (fallback created_at) >= ts — dùng cho throttle 4/ngày."""
+        n = 0
+        for i, row in enumerate(self.sheet.get_all_values(), start=1):
+            if i < 2:
+                continue
+            if row[self._col["status"] - 1] != "DONE":
+                continue
+            ref = self._to_int(row[self._col["updated_at"] - 1]) \
+                or self._to_int(row[self._col["created_at"] - 1])
+            if ref >= ts:
+                n += 1
+        return n
 
     def sweep_stale(self, older_than_min: int = 15, max_retries: int = 3) -> list[str]:
         """Job non-terminal quá cũ → RETRY (tăng retry_count) hoặc FAILED.

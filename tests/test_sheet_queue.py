@@ -130,20 +130,24 @@ def test_set_status_rejects_unknown_status():
 def test_sweep_stale_retries_then_fails_and_reports():
     # now = 2000; cutoff = 2000 - 15*60 = 1100
     rows = [HDR,
-            ["JOB-OLD", "PENDING", "u1", "42", "100", "115", "w", "", "", "0", "0"],
+            ["JOB-OLD", "CLAIMED", "u1", "42", "100", "115", "w", "", "", "0", "0"],
             ["JOB-NEW", "PENDING", "u2", "42", "9999", "", "", "", "", "0", "0"],
             ["JOB-MAX", "CLAIMED", "u3", "42", "100", "115", "w", "", "", "3", "0"],
-            ["JOB-DL", "DOWNLOADING", "u4", "42", "100", "100", "w", "", "", "1", "0"]]
+            ["JOB-DL", "DOWNLOADING", "u4", "42", "100", "100", "w", "", "", "1", "0"],
+            ["JOB-OLD-PENDING", "PENDING", "u5", "42", "100", "", "", "", "", "0", "0"]]
     q = q_with(rows, now_ts=2000)
     failed = q.sweep_stale(older_than_min=15, max_retries=3)
-    # JOB-OLD: stale, retries 0 < 3 → RETRY; JOB-NEW: mới → giữ nguyên
-    # JOB-MAX: stale, retries 3 ≥ 3 → FAILED; JOB-DL: stale (updated_at 100) → RETRY (retries 1+1=2)
+    # JOB-OLD: stale CLAIMED, retries 0 < 3 → RETRY; JOB-NEW: PENDING → giữ nguyên
+    # JOB-MAX: stale CLAIMED, retries 3 ≥ 3 → FAILED; JOB-DL: stale DOWNLOADING → RETRY (retries 1+1=2)
+    # JOB-OLD-PENDING: PENDING cũ → KHÔNG bị sweep
     assert q.sheet.rows[1][1] == "RETRY"
     assert q.sheet.rows[1][9] == "1"
     assert q.sheet.rows[2][1] == "PENDING"
     assert q.sheet.rows[3][1] == "FAILED"
     assert q.sheet.rows[4][1] == "RETRY"
     assert q.sheet.rows[4][9] == "2"
+    assert q.sheet.rows[5][1] == "PENDING"
+    assert q.sheet.rows[5][9] == "0"
     assert failed == ["JOB-MAX"]
 
 
@@ -156,7 +160,7 @@ def test_sweep_ignores_terminal_states():
 
 
 def test_sweep_uses_created_at_when_updated_at_empty():
-    rows = [HDR, ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"]]
+    rows = [HDR, ["JOB-1", "CLAIMED", "u1", "42", "100", "", "", "", "", "0", "0"]]
     q = q_with(rows, now_ts=100 + 16 * 60)
     failed = q.sweep_stale(older_than_min=15)
     assert q.sheet.rows[1][1] == "RETRY"
@@ -226,6 +230,32 @@ def test_get_job_returns_fresh_values_after_mutation():
     assert second.status == "DOWNLOADING"
     assert second.worker == "worker-a"
     assert second.error == "timeout"
+
+
+def test_count_done_since_chi_dem_done_trong_khoang():
+    rows = [HDR,
+            ["J1", "DONE", "u1", "42", "100", "200", "w", "9", "", "0", "0"],
+            ["J2", "DONE", "u2", "42", "100", "90", "w", "9", "", "0", "0"],
+            ["J3", "FAILED", "u3", "42", "100", "200", "w", "", "x", "3", "0"],
+            ["J4", "DONE", "u4", "42", "100", "", "w", "9", "", "0", "0"]]
+    q = q_with(rows, now_ts=300)
+    # chỉ J1: DONE + updated_at 200 >= 150. J4 rơi về created_at 100 < 150.
+    assert q.count_done_since(150) == 1
+
+
+def test_pending_khong_bi_sweep_thanh_retry():
+    rows = [HDR, ["J1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"]]
+    q = q_with(rows, now_ts=10000)
+    assert q.sweep_stale(older_than_min=15) == []
+    assert q.sheet.rows[1][1] == "PENDING"      # KHÔNG bị đổi thành RETRY
+    assert q.sheet.rows[1][9] == "0"            # KHÔNG bị đốt retry_count
+
+
+def test_in_flight_cu_van_bi_sweep():
+    rows = [HDR, ["J1", "DOWNLOADING", "u1", "42", "100", "100", "w", "", "", "0", "0"]]
+    q = q_with(rows, now_ts=10000)
+    assert q.sweep_stale(older_than_min=15) == []
+    assert q.sheet.rows[1][1] == "RETRY"
 
 
 def test_checkpoint_invalid_returns_zero():

@@ -5,6 +5,7 @@ import types
 import pytest
 
 from worker.config import Config
+from worker.sheet_queue import Job
 from controller.colab_dispatch import _write_bootstrap, _materialize_token, dispatch_to_colab
 
 
@@ -84,6 +85,7 @@ def test_dispatch_peeks_then_runs_colab(tmp_path, monkeypatch):
     q = MagicMock()
     job = MagicMock(job_id="JOB-1", status="PENDING", url="https://x/v.mp4")
     q.next_job.return_value = job
+    q.count_done_since.return_value = 0
     run = MagicMock(return_value=MagicMock(returncode=0))
     history = tmp_path / "history"
     history.mkdir(parents=True)
@@ -110,6 +112,7 @@ def test_dispatch_job_permanent_failure_is_green(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WORKER_ID", "override-worker")
     q = MagicMock()
     q.next_job.return_value = MagicMock(job_id="JOB-1", status="PENDING", url="u")
+    q.count_done_since.return_value = 0
     q.get_job.return_value = MagicMock(status="FAILED", worker="override-worker", error="HTTP 403")
     run = MagicMock(return_value=MagicMock(returncode=2))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
@@ -128,6 +131,7 @@ def test_dispatch_worker_never_claimed_is_red(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WORKER_ID", "override-worker")
     q = MagicMock()
     q.next_job.return_value = MagicMock(job_id="JOB-1", status="PENDING", url="u")
+    q.count_done_since.return_value = 0
     q.get_job.return_value = MagicMock(status="PENDING", worker="", error="")
     run = MagicMock(return_value=MagicMock(returncode=1))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
@@ -145,6 +149,7 @@ def test_dispatch_retry_with_stale_worker_is_red(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WORKER_ID", "override-worker")
     q = MagicMock()
     q.next_job.return_value = MagicMock(job_id="JOB-1", status="RETRY", url="u")
+    q.count_done_since.return_value = 0
     q.get_job.return_value = MagicMock(status="RETRY", worker="colab-old-run", error="")
     run = MagicMock(return_value=MagicMock(returncode=1))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
@@ -161,6 +166,7 @@ def test_dispatch_vm_died_midway_is_green(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WORKER_ID", "override-worker")
     q = MagicMock()
     q.next_job.return_value = MagicMock(job_id="JOB-1", status="PENDING", url="u")
+    q.count_done_since.return_value = 0
     q.get_job.return_value = MagicMock(status="DOWNLOADING", worker="override-worker", error="")
     run = MagicMock(return_value=MagicMock(returncode=1))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
@@ -169,3 +175,31 @@ def test_dispatch_vm_died_midway_is_green(tmp_path, monkeypatch, capsys):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
     assert rc == 0
     assert "::warning::JOB-1" in capsys.readouterr().out
+
+
+def test_dispatch_throttle_du_4_upload_thi_khong_goi_colab(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    q = MagicMock()
+    q.next_job.return_value = Job("JOB-1", "PENDING", "u", 42, 100, None, "", None, "", 0, "0", 2)
+    q.count_done_since.return_value = 4          # đã đủ 4 upload hôm nay
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run") as run, \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
+    assert rc == 0
+    run.assert_not_called()                      # KHÔNG tốn session Colab
+
+
+def test_dispatch_duoi_nguong_thi_van_chay_colab(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    q = MagicMock()
+    q.next_job.return_value = Job("JOB-1", "PENDING", "u", 42, 100, None, "", None, "", 0, "0", 2)
+    q.count_done_since.return_value = 3
+    q.get_job.return_value = Job("JOB-1", "DONE", "u", 42, 100, 200, "local", None, "", 0, "0", 2)
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run") as run, \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+        run.return_value = types.SimpleNamespace(returncode=0)
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
+    assert rc == 0
+    run.assert_called_once()                     # còn quota => chạy như cũ
