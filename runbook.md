@@ -320,9 +320,12 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
 
 ## 11. Luật Colab & chính sách dùng
 
-Quote ngày lấy: **2026-10-16**. Nguồn: Colab Terms v6 (2026-08-13),
-FAQ CLI README v0.6.0, Google Developers Blog (2026-06-05),
-Google Colab Tools issue #4979.
+Quote ngày lấy: **2026-10-16**. Nguồn:
+- Colab Terms v6 (2026-08-13): `https://colab.research.google.com/terms`
+- FAQ: `https://research.google.com/colaboratory/faq.html`
+- CLI README v0.6.0: `https://github.com/googlecolab/google-colab-cli`
+- Google Developers Blog (2026-06-05): `https://developers.googleblog.com/introducing-the-google-colab-cli/`
+- Google Colab Tools issue #4979: `https://github.com/googlecolab/colabtools/issues/4979`
 
 ### 1. Điều khoản ràng buộc
 
@@ -372,20 +375,17 @@ Quan hệ với điều khoản ở mục 1:
 ### 3. Tại sao phần tự động hoá của ta KHÔNG phải lách
 
 - **Headless automation được hỗ trợ chính chủ:** README `googlecolab/google-colab-cli`
-  @v0.6.0 nêu: "Provision high-performance CPU, GPU, and TPU runtimes, execute
+  @v0.6.0 (`https://github.com/googlecolab/google-colab-cli`) nêu: "Provision high-performance CPU, GPU, and TPU runtimes, execute
   local code, manage remote files, and **orchestrate automated cloud pipelines**
   — directly from your terminal. Designed to support seamless developer
   productivity, **headless automation, and AI agent integrations**."
-- **Teardown đúng cách trong `finally`:** `docs/05_run_command.md` @v0.6.0: "In
-  a `finally` block, unless `--keep` was passed, the CLI: Sends
-  `runtime.stop(shutdown_kernel=True)` ... Calls `state.client.unassign(endpoint)`
-  **to free the billable VM** ... Kills the keep-alive daemon."
+- **Teardown đúng cách trong `finally`:** `docs/05_run_command.md` @v0.6.0 (`https://github.com/googlecolab/google-colab-cli/blob/main/docs/05_run_command.md`): "**Tear down**: In a `finally` block, unless `--keep` was passed, the CLI: Sends `runtime.stop(shutdown_kernel=True)` (best-effort). Calls `state.client.unassign(endpoint)` **to free the billable VM**. Removes the session from `StateStore`. Kills the keep-alive daemon."
 - **Keep-alive daemon không phải bypass của ta:** `docs/01_session_management.md`
-  @v0.6.0: "This matches the official `colab-vscode` extension's
+  @v0.6.0 (`https://github.com/googlecolab/google-colab-cli/blob/main/docs/01_session_management.md`): "This matches the official `colab-vscode` extension's
   `sendKeepAlive`." `COLAB_SKILL.md` @v0.6.0: "**Always `colab stop -s <name>`
   when done** — idle VMs burn compute units."
 - **Workflow agent chuẩn được Google công bố:** Google Developers Blog,
-  "Introducing the Google Colab CLI" (2026-06-05): workflow agent kết thúc bằng
+  "Introducing the Google Colab CLI" (2026-06-05, `https://developers.googleblog.com/introducing-the-google-colab-cli/`): workflow agent kết thúc bằng
   `colab stop` ("…save the notebook log, and **cleanup**").
 
 ### 4. Điểm KHÔNG thể biện minh
@@ -430,7 +430,7 @@ thống.
 | Dùng CLI chính chủ `google-colab-cli`; `colab run` để VM tự teardown trong `finally` | Không truyền `--keep`, không tự viết keep-alive/heartbeat cho Colab |
 | Runtime CPU mặc định | Không GPU/TPU |
 | 1 tài khoản Google duy nhất | Không SSH/remote desktop/remote proxy; không share/resell quyền truy cập |
-| Tối đa 4 upload/ngày + 10 job mới/ngày (giờ VN); throttle ở controller trước khi tạo VM | Không containerize/lách anti-abuse; không nhiều tài khoản |
+| 4 upload/ngày: chặn ở controller TRƯỚC khi tạo session Colab (`controller/colab_dispatch.py:139-145`); 10 job mới/ngày: chặn ở GAS (`gas/bot-pipeline.gs:35` + `jobsCreatedToday()` tại `:151-156`) khi tạo job | Không containerize/lách anti-abuse; không nhiều tài khoản |
 | Mỗi job 1 session ngắn; release VM ngay khi xong | Không giữ VM idle khi "no active executions" |
 | Giới hạn throughput đủ thấp để tránh nhóm "media serving" | Không dùng Colab làm CDN/file host |
 | Log theo chunk lớn; không spam iopub | Không gửi heartbeat thừa; không toggle keep-alive |
