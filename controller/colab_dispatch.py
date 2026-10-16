@@ -1,9 +1,13 @@
 """Controller: peek queue, cấp Colab VM qua colab run, map exit code.
 
 Exit-code semantics:
-- 0: no job or job processed thành công trên VM.
-- 1+: transient hoặc worker-permanent. Mọi non-zero được watchdog retry;
-  permanent failure đã được worker ghi FAILED lên Sheet nên retry vô hại.
+- `colab run` propagate exit code của script chạy trên VM (bootstrap →
+  worker.main) VÀ dùng non-zero cho lỗi của chính CLI ⇒ exit code một mình
+  không phân biệt được "job lỗi" với "đường dispatch hỏng".
+- Vì vậy sau khi CLI kết thúc, controller đọc lại dòng job trên Sheet (nguồn
+  sự thật) rồi mới quyết định: chỉ trả non-zero khi worker CHƯA TỪNG claim
+  job (dispatch thật sự hỏng). Job lỗi vĩnh viễn / VM dừng giữa chừng đã được
+  worker ghi Sheet + notify owner ⇒ CI xanh kèm annotation `::warning::`.
 """
 from __future__ import annotations
 
@@ -40,6 +44,38 @@ def _materialize_token(colab_token_json: str) -> None:
     TOKEN_PATH.write_text(colab_token_json)
 
 
+def _annotate(level: str, message: str) -> None:
+    """Annotation hiện trên trang run của GitHub Actions (warning/error)."""
+    print(f"::{level}::{message}", flush=True)
+
+
+def _classify_run(queue: SheetQueue, job_id: str, returncode: int) -> int:
+    """Map exit code của `colab run` → exit code của CI (xem docstring đầu file).
+
+    - worker chưa claim job (cột `worker` rỗng) ⇒ không có gì chạy ⇒ đỏ.
+    - worker đã claim ⇒ job-level: DONE/FAILED (đã ghi Sheet + notify) hoặc
+      dở dang (sweep sẽ RETRY sau ≤15 phút) ⇒ xanh + `::warning::`.
+    """
+    if returncode == 0:
+        return 0
+    job = queue.get_job(job_id)
+    if job is None:
+        _annotate("error", f"{job_id}: colab run exit {returncode}, không đọc được dòng job trên Sheet")
+        return 1
+    if not job.worker:
+        _annotate("error", f"{job_id}: colab run exit {returncode}, Sheet={job.status}, "
+                            "worker chưa claim — dispatch thất bại")
+        return 1
+    if job.status in ("DONE", "FAILED"):
+        detail = f" ({job.error})" if job.error else ""
+        _annotate("warning", f"{job_id}: worker kết thúc exit {returncode}, "
+                             f"Sheet={job.status}{detail}")
+        return 0
+    _annotate("warning", f"{job_id}: worker dừng giữa chừng (exit {returncode}, "
+                         f"Sheet={job.status}) — sweep sẽ RETRY")
+    return 0
+
+
 def _write_bootstrap(worker_env: dict[str, str], worker_id: str) -> str:
     repo = os.environ["WORKER_REPO"]
     payload = {
@@ -74,7 +110,7 @@ def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json:
             f.write(bootstrap)
         cmd = ["colab", "run", "--timeout", COLAB_RUN_TIMEOUT_S, path]
         proc = subprocess.run(cmd, check=False)
-        return proc.returncode
+        return _classify_run(queue, job.job_id, proc.returncode)
     finally:
         try:
             Path(path).unlink()

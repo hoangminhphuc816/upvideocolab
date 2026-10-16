@@ -137,7 +137,16 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
    - Email failure từ cron-job.org = PAT hết hạn/token sai → rotate PAT
      (Task PAT trong §6b) rồi PATCH job qua console (headers → Authorization).
    - Workflow KHÔNG bị tự tắt nữa vì không còn trigger `schedule`.
-5. Lưu ý pipeline secrets: các secret chỉ tồn tại trong môi trường runner
+5. Run đỏ của `video-controller` đọc thế nào (từ 16-10-2026):
+   - Chỉ step `Xử lý job PENDING/RETRY còn lại (watchdog → Colab VM)` /
+     `Dispatch job lên Colab VM` mới có thể đỏ — đó là `colab_dispatch`.
+   - **Đỏ = dispatch hỏng thật**: worker chưa từng claim job (Sheet còn
+     PENDING/RETRY, cột `worker` rỗng) → job không chạy, cần xem log +
+     annotation `::error::` của run.
+   - **Xanh kèm `::warning::` = job lỗi ở tầng job** (Sheet FAILED, hoặc VM
+     dừng giữa chừng để sweep RETRY). Chi tiết lỗi nằm ở cột `error` trên
+     Sheet + tin `[FAIL]` Telegram — không phải trên GitHub.
+6. Lưu ý pipeline secrets: các secret chỉ tồn tại trong môi trường runner
    ~30 giây, sau đó controller bootstrap truyền env xuống VM qua prelude
    `os.environ` trong `colab_bootstrap.py` (session ephemeral, tự teardown).
    Riêng `COLAB_TOKEN_JSON` **không** được truyền

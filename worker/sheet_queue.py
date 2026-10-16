@@ -98,6 +98,14 @@ class SheetQueue:
         _, _, i, row = min(candidates, key=lambda c: (c[0], c[1]))
         return self._parse_row(i, row)
 
+    def get_job(self, job_id: str) -> Job | None:
+        """Đọc lại dòng job (giá trị tươi) — dùng cho controller phân loại sau
+        khi `colab run` kết thúc."""
+        row = self._row_by_job_id(job_id)
+        if row is None:
+            return None
+        return self._parse_row(row, self.sheet.get_all_values()[row - 1])
+
     def _parse_row(self, i: int, row: list[str]) -> Job:
         def cell(name: str) -> str:
             idx = self._col[name] - 1
