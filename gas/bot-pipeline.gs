@@ -318,55 +318,25 @@ function debugToOwner(text) {
   }
 }
 
-/**
- * Kiểm tra MP4 đã có job DONE trong 24h gần nhất chưa.
- * Ưu tiên match theo media_key (status_id) nếu có; fallback URL cho hàng cũ.
- * @return {string} job_id nếu trùng, ngược lại "" (falsy).
- */
-function isRecentlyDone(mp4Url, statusId) {
-  try {
-    var props = PropertiesService.getScriptProperties();
-    var sheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID'))
-        .getSheetByName('Jobs');
-    if (!sheet) return '';
-    var rows = sheet.getDataRange().getValues();
-    var now = Math.floor(Date.now() / 1000);
-    for (var i = rows.length - 1; i >= 1; i--) {
-      if (String(rows[i][1]) !== 'DONE') continue;
-      var updated = Number(rows[i][5]) || 0;
-      if (now - updated >= 24 * 3600) continue;
-      var rowMediaKey = String(rows[i][11] || '');
-      var matched = false;
-      if (statusId && rowMediaKey && rowMediaKey === statusId) {
-        matched = true;
-      } else if (!statusId && String(rows[i][2]) === mp4Url) {
-        matched = true;
-      }
-      if (matched) {
-        return String(rows[i][0]);
-      }
-    }
-  } catch (e) {
-    console.warn('isRecentlyDone lỗi (bỏ qua, cho phép tạo job): ' + e);
-  }
-  return '';
-}
-
 // Trả về job_id nếu cùng video đang chờ/đang chạy (status != FAILED) HOẶC đã DONE trong 24h.
 // Trả về null nếu chưa có gì ⇒ được tạo job mới. Job FAILED thì cho gửi lại.
 function isQueuedOrRecent(mp4Url, statusId) {
-  var rows = jobsSheet().getDataRange().getValues();
-  var now = Math.floor(Date.now() / 1000);
-  for (var i = rows.length - 1; i >= 1; i--) {
-    var status = String(rows[i][1]);
-    if (status === 'FAILED') continue;
-    if (status === 'DONE') {
-      var updated = Number(rows[i][5]) || 0;
-      if (now - updated >= 24 * 3600) continue;
+  try {
+    var rows = jobsSheet().getDataRange().getValues();
+    var now = Math.floor(Date.now() / 1000);
+    for (var i = rows.length - 1; i >= 1; i--) {
+      var status = String(rows[i][1]);
+      if (status === 'FAILED') continue;
+      if (status === 'DONE') {
+        var updated = Number(rows[i][5]) || 0;
+        if (now - updated >= 24 * 3600) continue;
+      }
+      var rowMediaKey = String(rows[i][11] || '');
+      if (statusId && rowMediaKey && rowMediaKey === statusId) return String(rows[i][0]);
+      if (!statusId && String(rows[i][2]) === mp4Url) return String(rows[i][0]);
     }
-    var rowMediaKey = String(rows[i][11] || '');
-    if (statusId && rowMediaKey && rowMediaKey === statusId) return String(rows[i][0]);
-    if (!statusId && String(rows[i][2]) === mp4Url) return String(rows[i][0]);
+  } catch (e) {
+    console.warn('isQueuedOrRecent lỗi (bỏ qua, cho phép tạo job): ' + e);
   }
   return null;
 }
@@ -378,13 +348,18 @@ function startOfTodayVnEpoch() {
 }
 
 function jobsCreatedToday() {
-  var rows = jobsSheet().getDataRange().getValues();
-  var start = startOfTodayVnEpoch();
-  var n = 0;
-  for (var i = 1; i < rows.length; i++) {
-    if ((Number(rows[i][4]) || 0) >= start) n++;
+  try {
+    var rows = jobsSheet().getDataRange().getValues();
+    var start = startOfTodayVnEpoch();
+    var n = 0;
+    for (var i = 1; i < rows.length; i++) {
+      if ((Number(rows[i][4]) || 0) >= start) n++;
+    }
+    return n;
+  } catch (e) {
+    console.warn('jobsCreatedToday lỗi (bỏ qua, cho phép tạo job): ' + e);
+    return 0;
   }
-  return n;
 }
 /**
  * Response 200 trực tiếp KHÔNG redirect — Telegram webhook coi 302 (mà
