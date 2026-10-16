@@ -27,7 +27,11 @@ from worker.sheet_queue import SheetQueue
 
 TOKEN_PATH = Path.home() / ".config" / "colab-cli" / "token.json"
 HISTORY_DIR = Path.home() / ".config" / "colab-cli" / "history"
-COLAB_RUN_TIMEOUT_S = os.environ.get("COLAB_RUN_TIMEOUT_S", "3600")
+# `--timeout` của `colab run` là HẠN TUYỆT ĐỐI cho cả cell (jupyter_kernel_client
+# wsclient.py: deadline = monotonic() + timeout) — in log KHÔNG gia hạn nó.
+# 7200s là chính sách đã chốt: VM vẫn được CLI release ngay khi cell xong, nên hạn
+# dài không giữ VM idle. Đổi bằng env COLAB_RUN_TIMEOUT_S.
+COLAB_RUN_TIMEOUT_S = os.environ.get("COLAB_RUN_TIMEOUT_S", "7200")
 
 TZ_VN = "Asia/Ho_Chi_Minh"  # UTC+7, không có DST
 DAILY_UPLOAD_LIMIT = int(os.environ.get("DAILY_UPLOAD_LIMIT", "4"))
@@ -90,6 +94,13 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
         _annotate("warning", f"{job_id}: worker kết thúc exit {returncode}, "
                              f"Sheet={job.status}{detail}")
         return 0
+    if not job.error:
+        queue.set_status(
+            job.job_id,
+            job.status,
+            error=f"worker dừng giữa chừng (exit {returncode}) — có thể vượt hạn "
+                  f"COLAB_RUN_TIMEOUT_S={COLAB_RUN_TIMEOUT_S}s",
+        )
     _annotate("warning", f"{job_id}: worker dừng giữa chừng (exit {returncode}, "
                          f"Sheet={job.status}) — sweep sẽ RETRY")
     return 0

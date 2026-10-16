@@ -318,6 +318,21 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
   `checkpoint` dùng `dl:<bytes>`: hữu ích trong-session + chẩn đoán — xuyên-session
   part file không còn → VM mới mismatch → reset `dl:0` → tải lại từ đầu.
 
+## 10d. Chính sách ngân sách thời gian Colab
+
+- **Mặc định đang dùng**: `COLAB_RUN_TIMEOUT_S=7200` (~2 giờ) — hạn tuyệt đối
+  của `colab run --timeout` cho cả cell (jupyter_kernel_client tính deadline một
+  lần; log không reset nó).
+- **Tại sao không dài hơn vô hạn**: mục tiêu là job thường xuyên hoàn thành
+  trong hạn; chính sách giữ session ngắn để giảm rủi ro anti-abuse.
+- **Cách đổi**: chỉ đổi env `COLAB_RUN_TIMEOUT_S` trong `.env` hoặc GitHub
+  Actions env; **không sửa code**.
+- **Residual**: job quá lớn không xong trong hạn vẫn sẽ tốn tối đa **3 session**
+  Colab rồi FAILED (`max_retries=3`). Nếu gặp thường xuyên: cân nhắc giảm
+  chất lượng đầu vào, cắt video nhỏ hơn, hoặc chốt nguồn URL thân thiện
+  throughput thấp hơn. Nếu muốn giới hạn mạnh hơn nữa, thêm bộ đếm
+  session/ngày riêng — ngoài phạm vi hiện tại.
+
 ## 11. Luật Colab & chính sách dùng
 
 Quote ngày lấy: **2026-10-16**. Nguồn:

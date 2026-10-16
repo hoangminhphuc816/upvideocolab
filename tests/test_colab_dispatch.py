@@ -6,7 +6,7 @@ import pytest
 
 from worker.config import Config
 from worker.sheet_queue import Job
-from controller.colab_dispatch import _write_bootstrap, _materialize_token, dispatch_to_colab
+from controller.colab_dispatch import _write_bootstrap, _materialize_token, dispatch_to_colab, _classify_run
 
 
 def make_cfg():
@@ -97,7 +97,7 @@ def test_dispatch_peeks_then_runs_colab(tmp_path, monkeypatch):
     assert rc == 0
     cmd = run_mock.call_args[0][0]
     assert cmd[:2] == ["colab", "run"]
-    assert "--timeout" in cmd and "3600" in cmd
+    assert "--timeout" in cmd and "7200" in cmd
     bootstrap = cmd[cmd.index("--timeout") + 2]
     assert bootstrap.endswith(".py")
     q.claim.assert_not_called()
@@ -203,3 +203,26 @@ def test_dispatch_duoi_nguong_thi_van_chay_colab(tmp_path, monkeypatch):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
     assert rc == 0
     run.assert_called_once()                     # còn quota => chạy như cũ
+
+
+def test_classify_run_ghi_ly_do_khi_worker_dung_giua_chung(capsys):
+    """Job bị cắt giữa chừng: CI vẫn xanh (sweep sẽ RETRY) nhưng phải để lại
+    lý do trong cột error để lần sau không mò."""
+    job = Job("JOB-1", "DOWNLOADING", "u", 42, 100, 200, "colab-run1", None, "", 0, "dl:5", 2)
+    q = MagicMock()
+    q.get_job.return_value = job
+    assert _classify_run(q, "JOB-1", "colab-run1", 1) == 0
+    assert "::warning::JOB-1" in capsys.readouterr().out
+    q.set_status.assert_called_once()
+    kwargs = q.set_status.call_args.kwargs
+    assert kwargs["error"].startswith("worker dừng giữa chừng")
+    assert "7200" in kwargs["error"]
+
+
+def test_classify_run_khong_ghi_de_error_da_co(capsys):
+    job = Job("JOB-1", "DOWNLOADING", "u", 42, 100, 200, "colab-run1", None, "lỗi cũ", 0, "dl:5", 2)
+    q = MagicMock()
+    q.get_job.return_value = job
+    assert _classify_run(q, "JOB-1", "colab-run1", 1) == 0
+    assert "::warning::JOB-1" in capsys.readouterr().out
+    q.set_status.assert_not_called()
