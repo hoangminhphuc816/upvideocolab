@@ -317,3 +317,124 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
 - File đúng bội số 256MB → HTTP 416 → worker EOF guard tự assemble; Sheet
   `checkpoint` dùng `dl:<bytes>`: hữu ích trong-session + chẩn đoán — xuyên-session
   part file không còn → VM mới mismatch → reset `dl:0` → tải lại từ đầu.
+
+## 11. Luật Colab & chính sách dùng
+
+Quote ngày lấy: **2026-10-16**. Nguồn: Colab Terms v6 (2026-08-13),
+FAQ CLI README v0.6.0, Google Developers Blog (2026-06-05),
+Google Colab Tools issue #4979.
+
+### 1. Điều khoản ràng buộc
+
+Nguồn: `https://colab.research.google.com/terms` (bản v6, sửa 2026-08-13)
+
+> "Our FAQ contains general information about Colab, including restricted
+> activities, resource limits and supported browsers. **You agree to those
+> policies and usage limitations.**"
+
+> "In addition, you may not: share access to your account or use someone else's
+> account to access Colab; **access Colab other than as authorized by Google**;
+> or sell, rent, or otherwise provide direct or indirect access to Colab to any
+> third party."
+
+### 2. Danh sách bị cấm theo FAQ
+
+Nguồn: `https://research.google.com/colaboratory/faq.html`
+
+**Cấm ở MỌI tier managed runtime:**
+
+> "Colab managed runtimes prohibit abusive actions that negatively impact others
+> and actions associated with bypassing our policies. The following are
+> **disallowed from all managed Colab runtimes**: file hosting, media serving,
+> or other web service offerings not related to interactive compute with Colab;
+> downloading torrents or engaging in peer-to-peer file-sharing; connecting to
+> remote proxies; mining cryptocurrency; running denial-of-service attacks;
+> password cracking; using multiple accounts to work around access or resource
+> usage restrictions; creating deepfakes; employing techniques such as
+> containerization to circumvent anti-abuse policies."
+
+**Cấm riêng ở free tier (no positive Colab compute unit balance):**
+
+> "The following are disallowed from managed Colab runtimes running free of
+> charge, without a positive Colab compute unit balance, and **may be terminated
+> at any time without warning**: remote control such as SSH shells, remote
+> desktops; **bypassing the notebook UI to interact primarily via a web UI**;
+> chess training; running distributed computing workers."
+
+> "Users in our free of charge tier commonly experience runtime terminations
+> when attempting to bypass the notebook UI and using a web UI on a Colab managed
+> runtime **for content generation**."
+
+Quan hệ với điều khoản ở mục 1:
+
+> "You agree to those policies and usage limitations."
+
+### 3. Tại sao phần tự động hoá của ta KHÔNG phải lách
+
+- **Headless automation được hỗ trợ chính chủ:** README `googlecolab/google-colab-cli`
+  @v0.6.0 nêu: "Provision high-performance CPU, GPU, and TPU runtimes, execute
+  local code, manage remote files, and **orchestrate automated cloud pipelines**
+  — directly from your terminal. Designed to support seamless developer
+  productivity, **headless automation, and AI agent integrations**."
+- **Teardown đúng cách trong `finally`:** `docs/05_run_command.md` @v0.6.0: "In
+  a `finally` block, unless `--keep` was passed, the CLI: Sends
+  `runtime.stop(shutdown_kernel=True)` ... Calls `state.client.unassign(endpoint)`
+  **to free the billable VM** ... Kills the keep-alive daemon."
+- **Keep-alive daemon không phải bypass của ta:** `docs/01_session_management.md`
+  @v0.6.0: "This matches the official `colab-vscode` extension's
+  `sendKeepAlive`." `COLAB_SKILL.md` @v0.6.0: "**Always `colab stop -s <name>`
+  when done** — idle VMs burn compute units."
+- **Workflow agent chuẩn được Google công bố:** Google Developers Blog,
+  "Introducing the Google Colab CLI" (2026-06-05): workflow agent kết thúc bằng
+  `colab stop` ("…save the notebook log, and **cleanup**").
+
+### 4. Điểm KHÔNG thể biện minh
+
+> "**disallowed from all managed Colab runtimes**: file hosting, media serving,
+> or other web service offerings not related to interactive compute with Colab"
+
+Workload của ta — **tải media rồi phát sang Telegram** — nằm sát nhóm
+"media serving". Google không công bố ngưỡng rõ ràng ("serve bao nhiêu MB/ngày
+bị coi là media serving?"), nên đây là **điểm xét đoán**, không thể biện minh
+tuyệt đối. Ta chấp nhận rủi ro này bằng cách giữ session ngắn, 1 tài khoản,
+không keep-alive, giới hạn throughput (4 upload/ngày, 10 job/ngày).
+
+### 5. Hậu quả nếu bị flag + đường khiếu nại
+
+Nguồn: `https://github.com/googlecolab/colabtools/issues/4979`
+
+Thông báo in-product:
+
+> "This account has been blocked from accessing Colab runtimes due to suspected
+> abusive activity. **This does not impact access to other Google products.** If
+> you believe this has been done in error, review the usage limitations and file
+> an appeal."
+
+**False positive có thật:** @cperry-goog (Google) cùng issue:
+
+> "We hit an issue where our abuse detection was **picking up false positives**.
+> We've unbanned all affected accounts and updated our abuse rules which should
+> address this."
+
+Cụ thể vụ ban nhầm liên quan package `ultralytics` 8.3.41: Google đã gỡ ban
+cho tất cả tài khoản bị ảnh hưởng.
+
+Khiếu nại: mở Colab → Help → Send Feedback (in-product). Kèm issue:
+`https://github.com/googlecolab/colabtools/issues/4979` đã ghi nhận lỗi hệ
+thống.
+
+### 6. Ta làm / Ta KHÔNG làm
+
+| Làm | Không làm |
+| --- | --- |
+| Dùng CLI chính chủ `google-colab-cli`; `colab run` để VM tự teardown trong `finally` | Không truyền `--keep`, không tự viết keep-alive/heartbeat cho Colab |
+| Runtime CPU mặc định | Không GPU/TPU |
+| 1 tài khoản Google duy nhất | Không SSH/remote desktop/remote proxy; không share/resell quyền truy cập |
+| Tối đa 4 upload/ngày + 10 job mới/ngày (giờ VN); throttle ở controller trước khi tạo VM | Không containerize/lách anti-abuse; không nhiều tài khoản |
+| Mỗi job 1 session ngắn; release VM ngay khi xong | Không giữ VM idle khi "no active executions" |
+| Giới hạn throughput đủ thấp để tránh nhóm "media serving" | Không dùng Colab làm CDN/file host |
+| Log theo chunk lớn; không spam iopub | Không gửi heartbeat thừa; không toggle keep-alive |
+| Worker đọc checkpoint `dl:<bytes>` để resume trong-session | Không dùng Drive mount để persist xuyên session |
+
+Mốc kiểm chứng: **Toàn bộ quote lấy ngày 2026-10-16**; trang ToS có thể đổi —
+nếu **>3 tháng**, đọc lại `colab.research.google.com/terms` trước khi kết luận.
