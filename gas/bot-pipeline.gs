@@ -32,6 +32,13 @@
 //   curl "https://api.telegram.org/bot<BOT_TOKEN>/deleteWebhook"
 // ============================================================================
 
+var DAILY_JOB_CAP = 10;
+
+function jobsSheet() {
+  var props = PropertiesService.getScriptProperties();
+  return SpreadsheetApp.openById(props.getProperty('SHEET_ID')).getSheetByName('Jobs');
+}
+
 function doGet() {
   return _ok200("Pipeline bot hoạt động tốt!");
 }
@@ -129,15 +136,22 @@ function doPost(e) {
       return _ok200('ok');
     }
 
-    // ---- Chống trùng lặp theo status_id, fallback URL cho hàng cũ ----
-    var recentDup = isRecentlyDone(mp4Url, statusId);
-    if (recentDup) {
-      console.log('PIPELINE-DUP ' + mp4Url + ' → job ' + recentDup + ' đã DONE');
-      var dupMsg = 'ℹ️ Video này đã được upload gần đây (job ' + recentDup + '). Không tạo lại.';
+    // ---- Chống trùng: job đang chờ/đang chạy HOẶC DONE trong 24h ----
+    var dupJob = isQueuedOrRecent(mp4Url, statusId);
+    if (dupJob) {
+      console.log('PIPELINE-DUP ' + mp4Url + ' → job ' + dupJob);
+      var dupMsg = 'ℹ️ Video này đã có trong hàng đợi hoặc đã upload (job ' + dupJob + '). Không tạo lại.';
       if (statusId) {
         dupMsg += ' (media_key=' + statusId + ')';
       }
       sendTelegramMessage(chatId, dupMsg);
+      return _ok200('ok');
+    }
+
+    // ---- Cap 10 job/ngày (giờ VN) ----
+    if (jobsCreatedToday() >= DAILY_JOB_CAP) {
+      sendTelegramMessage(chatId,
+          '⛔ Hôm nay đã đủ ' + DAILY_JOB_CAP + ' job. Gửi lại sau 00:00 (giờ VN).');
       return _ok200('ok');
     }
 
@@ -336,6 +350,41 @@ function isRecentlyDone(mp4Url, statusId) {
     console.warn('isRecentlyDone lỗi (bỏ qua, cho phép tạo job): ' + e);
   }
   return '';
+}
+
+// Trả về job_id nếu cùng video đang chờ/đang chạy (status != FAILED) HOẶC đã DONE trong 24h.
+// Trả về null nếu chưa có gì ⇒ được tạo job mới. Job FAILED thì cho gửi lại.
+function isQueuedOrRecent(mp4Url, statusId) {
+  var rows = jobsSheet().getDataRange().getValues();
+  var now = Math.floor(Date.now() / 1000);
+  for (var i = rows.length - 1; i >= 1; i--) {
+    var status = String(rows[i][1]);
+    if (status === 'FAILED') continue;
+    if (status === 'DONE') {
+      var updated = Number(rows[i][5]) || 0;
+      if (now - updated >= 24 * 3600) continue;
+    }
+    var rowMediaKey = String(rows[i][11] || '');
+    if (statusId && rowMediaKey && rowMediaKey === statusId) return String(rows[i][0]);
+    if (!statusId && String(rows[i][2]) === mp4Url) return String(rows[i][0]);
+  }
+  return null;
+}
+
+// VN = UTC+7, không DST ⇒ cố định +0700
+function startOfTodayVnEpoch() {
+  var ymd = Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'yyyy/MM/dd');
+  return Math.floor(new Date(ymd + ' 00:00:00 GMT+0700').getTime() / 1000);
+}
+
+function jobsCreatedToday() {
+  var rows = jobsSheet().getDataRange().getValues();
+  var start = startOfTodayVnEpoch();
+  var n = 0;
+  for (var i = 1; i < rows.length; i++) {
+    if ((Number(rows[i][4]) || 0) >= start) n++;
+  }
+  return n;
 }
 /**
  * Response 200 trực tiếp KHÔNG redirect — Telegram webhook coi 302 (mà

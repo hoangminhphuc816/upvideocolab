@@ -291,7 +291,24 @@ python -m controller.colab_dispatch
 | Bot trả "đã upload gần đây" cho link MỚI | getxbot trả URL sai/trùng (cache IP). Đã fix: dedupe theo status_id (cột L `media_key`) từ link gốc, fallback URL chỉ cho hàng cũ. Nếu tái diễn: kiểm tra cột L đã điền khi tạo job |
 | Video resolve "OK" nhưng bot bảo DUP link khác | Cùng nguyên nhân trên — xem cột L: nếu trống → hàng cũ trước khi fix, fallback theo URL có thể khớp nhầm nếu getxbot từng trả sai URL. Xóa hàng DUP nhầm trong Sheet rồi gửi lại link |
 
-## 10b. Chính sách anti-abuse v3
+## 10b. Kiểm tra GAS
+
+Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ công.
+
+1. **Deploy phiên bản mới**: mở Apps Script project → Save → Deploy → New
+   deployment → cấu hình giống bản đang chạy → deploy.
+2. **Kiểm tra dedup + hàng đợi**: thêm tay 1 row `DONE` với `created_at` /
+   `updated_at` = hôm nay, `media_key` = 1 status id thật → gửi link ứng
+   với status đó → kỳ vọng nhận “đã có trong hàng đợi/đã upload”, Sheet
+   không tạo row mới.
+3. **Kiểm tra cap 10 job/ngày**: thêm tay 10 row có `created_at` = hôm nay →
+   gửi 1 link mới → kỳ vọng nhận “⛔ Hôm nay đã đủ 10 job” và Sheet
+   không thêm row mới.
+4. **Dọn dẹp**: xoá các row test sau khi kiểm tra.
+5. **Ghi lại kết quả**: lưu snapshot kết quả kiểm tra vào phiên làm việc
+   hoặc ghi chú nội bộ; không ghi công khai vì bảo mật.
+
+## 10c. Chính sách anti-abuse v3
 
 - Colab session ngắn tự nhiên, tự teardown — **KHÔNG** keep-alive, **KHÔNG** hard-limit giả lập.
 - Worker log theo chunk/chặng lớn, không spam iopub.
