@@ -226,3 +226,14 @@ def test_classify_run_khong_ghi_de_error_da_co(capsys):
     assert _classify_run(q, "JOB-1", "colab-run1", 1) == 0
     assert "::warning::JOB-1" in capsys.readouterr().out
     q.set_status.assert_not_called()
+
+
+def test_classify_run_bo_qua_when_status_khong_hop_le(capsys):
+    job = Job("JOB-1", "GHOST", "u", 42, 100, 200, "colab-run1", None, "", 0, "dl:5", 2)
+    q = MagicMock()
+    q.get_job.return_value = job
+    assert _classify_run(q, "JOB-1", "colab-run1", 1) == 0
+    out = capsys.readouterr().out
+    assert "::warning::JOB-1" in out
+    assert "status lạ 'GHOST'" in out
+    q.set_status.assert_not_called()

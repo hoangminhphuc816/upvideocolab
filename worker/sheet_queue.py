@@ -188,8 +188,9 @@ class SheetQueue:
         return n
 
     def sweep_stale(self, older_than_min: int = 15, max_retries: int = 3) -> list[str]:
-        """Job non-terminal quá cũ → RETRY (tăng retry_count) hoặc FAILED.
+        """Job đang in-flight (CLAIMED/DOWNLOADING/UPLOADING) quá cũ → RETRY.
 
+        PENDING không bị sweep: chưa từng thử ⇒ không tính là stale.
         Trả về danh sách job_id vừa bị FAILED để caller notify.
         Tuổi tính bằng updated_at (fallback created_at) so với now.
         """

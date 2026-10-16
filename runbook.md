@@ -311,7 +311,7 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
 ## 10c. Chính sách anti-abuse v3
 
 - Colab session ngắn tự nhiên, tự teardown — **KHÔNG** keep-alive, **KHÔNG** hard-limit giả lập.
-- Worker log theo chunk/chặng lớn, không spam iopub.
+- Worker log tiến độ thật, tối đa ~1 dòng/15s và chỉ khi có byte mới (không spam iopub).
 - `COLAB_TOKEN_JSON` chỉ tồn tại runner-local (`~/.config/colab-cli/token.json`)
   rồi xoá; không truyền xuống VM.
 - File đúng bội số 256MB → HTTP 416 → worker EOF guard tự assemble; Sheet
@@ -327,8 +327,8 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
   trong hạn; chính sách giữ session ngắn để giảm rủi ro anti-abuse.
 - **Cách đổi**: chỉ đổi env `COLAB_RUN_TIMEOUT_S` trong `.env` hoặc GitHub
   Actions env; **không sửa code**.
-- **Residual**: job quá lớn không xong trong hạn vẫn sẽ tốn tối đa **3 session**
-  Colab rồi FAILED (`max_retries=3`). Nếu gặp thường xuyên: cân nhắc giảm
+- **Residual**: job quá lớn không xong trong hạn vẫn sẽ tốn tối đa **4 session**
+  Colab rồi FAILED (1 lượt đầu + 3 retry, `max_retries=3`). Nếu gặp thường xuyên: cân nhắc giảm
   chất lượng đầu vào, cắt video nhỏ hơn, hoặc chốt nguồn URL thân thiện
   throughput thấp hơn. Nếu muốn giới hạn mạnh hơn nữa, thêm bộ đếm
   session/ngày riêng — ngoài phạm vi hiện tại.
@@ -448,7 +448,7 @@ thống.
 | 4 upload/ngày: chặn ở controller TRƯỚC khi tạo session Colab (`controller/colab_dispatch.py:139-145`); 10 job mới/ngày: chặn ở GAS (`gas/bot-pipeline.gs:35` + `jobsCreatedToday()` tại `:151-156`) khi tạo job | Không containerize/lách anti-abuse; không nhiều tài khoản |
 | Mỗi job 1 session ngắn; release VM ngay khi xong | Không giữ VM idle khi "no active executions" |
 | Giới hạn throughput đủ thấp để tránh nhóm "media serving" | Không dùng Colab làm CDN/file host |
-| Log theo chunk lớn; không spam iopub | Không gửi heartbeat thừa; không toggle keep-alive |
+| Worker log tiến độ thật, tối đa ~1 dòng/15s và chỉ khi có byte mới (không spam iopub) | Không gửi heartbeat thừa; không toggle keep-alive |
 | Worker đọc checkpoint `dl:<bytes>` để resume trong-session | Không dùng Drive mount để persist xuyên session |
 
 Mốc kiểm chứng: **Toàn bộ quote lấy ngày 2026-10-16**; trang ToS có thể đổi —

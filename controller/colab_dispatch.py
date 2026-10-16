@@ -23,7 +23,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from worker.config import Config
-from worker.sheet_queue import SheetQueue
+from worker.sheet_queue import SheetQueue, STATUSES
 
 TOKEN_PATH = Path.home() / ".config" / "colab-cli" / "token.json"
 HISTORY_DIR = Path.home() / ".config" / "colab-cli" / "history"
@@ -93,6 +93,11 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
         detail = f" ({job.error})" if job.error else ""
         _annotate("warning", f"{job_id}: worker kết thúc exit {returncode}, "
                              f"Sheet={job.status}{detail}")
+        return 0
+    if job.status not in STATUSES:
+        _annotate("warning", f"{job_id}: colab run exit {returncode}, "
+                             f"Sheet status lạ '{job.status}' — bỏ qua ghi error, "
+                             f"sweep sẽ xử lý sau nếu còn in-flight")
         return 0
     if not job.error:
         queue.set_status(

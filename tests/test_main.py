@@ -1,3 +1,4 @@
+import time
 from unittest.mock import AsyncMock, MagicMock, ANY, call, patch
 
 import pytest
@@ -14,6 +15,26 @@ def make_cfg(dl_dir: str = "/tmp") -> Config:
         sa_json="{}", sheet_id="S", bot_token="t",
         sheet_name="Jobs", dl_dir=dl_dir,
     )
+
+
+def scripted_clock(*values):
+    """Giá trị scripted cho `time.monotonic`; hết script thì rơi về đồng hồ thật.
+
+    KHÔNG patch trực tiếp `worker.main.time.monotonic`: `worker.main.time` chính
+    là module `time` toàn cục, mà `asyncio.BaseEventLoop.time()` cũng gọi
+    `time.monotonic()` ⇒ patch sẽ đóng băng đồng hồ event loop và treo future
+    (side_effect kiểu list còn cạn kiệt ⇒ StopIteration). Thay vào đó gán hẳn
+    một đối tượng vào namespace `worker.main`.
+    """
+    it = iter(values)
+
+    def clock() -> float:
+        try:
+            return next(it)
+        except StopIteration:
+            return time.monotonic()
+
+    return clock
 
 
 def make_job():
@@ -187,7 +208,9 @@ async def test_run_once_chunked_resume_flow(tmp_path):
     row.checkpoint = "dl:0"
     q.next_job.return_value = row
     q.claim.return_value = True
+    clock = scripted_clock(1000.0)
     with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.time", MagicMock(monotonic=clock)), \
          patch("worker.main.probe_range_support", return_value=True), \
          patch("worker.main.download_chunk", side_effect=[("/tmp/p.part", CHUNK_SIZE), ("/tmp/p.part", 10)]) as dc, \
          patch("worker.main.checkpoint_dl_bytes", side_effect=[0, CHUNK_SIZE]), \
@@ -199,13 +222,14 @@ async def test_run_once_chunked_resume_flow(tmp_path):
          patch("os.unlink") as unlink:
         from worker.main import run_once
         rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+        cb = dc.call_args_list[0].kwargs["on_progress"]
+        cb(CHUNK_SIZE, CHUNK_SIZE + 10, 0.1)
     assert rc == 0
     assert dc.call_args_list == [
         call("https://x/v.mp4", start=0, dest_dir=str(tmp_path), on_progress=ANY),
         call("https://x/v.mp4", start=CHUNK_SIZE, dest_dir=str(tmp_path), on_progress=ANY),
     ]
-    cb = dc.call_args_list[0].kwargs["on_progress"]
-    cb(CHUNK_SIZE, CHUNK_SIZE + 10, 0.1)
+    # giờ giả 1000s > 300s ⇒ nhịp tim phải được ghi
     q.touch.assert_called_with("JOB-1")
     assert q.set_checkpoint.call_args_list == [
         call("JOB-1", f"dl:{CHUNK_SIZE}"),
@@ -214,11 +238,52 @@ async def test_run_once_chunked_resume_flow(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_on_progress_nhip_tim_theo_nguong_300s(tmp_path):
+    q = MagicMock()
+    row = make_job()
+    row.checkpoint = "dl:0"
+    q.next_job.return_value = row
+    q.claim.return_value = True
+    # 4 lần gọi callback, mỗi lần đọc 1 giá trị: 299 < 300, 300 = ngưỡng,
+    # 599 (599-300=299 < 300), 900 (900-300=600 ≥ 300).
+    clock = scripted_clock(299.0, 300.0, 599.0, 900.0)
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.time", MagicMock(monotonic=clock)), \
+         patch("worker.main.probe_range_support", return_value=True), \
+         patch("worker.main.download_chunk", side_effect=[("/tmp/p.part", CHUNK_SIZE), ("/tmp/p.part", 10)]) as dc, \
+         patch("worker.main.checkpoint_dl_bytes", return_value=0), \
+         patch("worker.main.assemble", return_value=str(tmp_path / "video.mp4")), \
+         patch("worker.main.validate_video"), \
+         patch("worker.main.upload_to_channel", AsyncMock(return_value=777)), \
+         patch("worker.main.notify_done"), \
+         patch("worker.main.notify_failed"), \
+         patch("os.unlink") as unlink:
+        from worker.main import run_once
+        rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+        cb = dc.call_args.kwargs["on_progress"]
+
+        cb(CHUNK_SIZE, CHUNK_SIZE + 10, 0.1)      # 299s: chưa đủ 300s
+        q.touch.assert_not_called()
+
+        cb(CHUNK_SIZE, CHUNK_SIZE + 10, 0.2)      # đúng ngưỡng 300s
+        q.touch.assert_called_once_with("JOB-1")
+
+        cb(CHUNK_SIZE, CHUNK_SIZE + 10, 0.3)      # 599s: mới 299s kể từ nhịp trước
+        assert q.touch.call_count == 1
+
+        cb(CHUNK_SIZE, CHUNK_SIZE + 10, 0.4)      # 900s: 600s kể từ nhịp trước
+        assert q.touch.call_count == 2
+    assert rc == 0
+
+
+@pytest.mark.asyncio
 async def test_run_once_no_range_fallback_full_download(tmp_path):
     q = MagicMock()
     q.next_job.return_value = make_job()
     q.claim.return_value = True
+    clock = scripted_clock(1000.0)
     with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.time", MagicMock(monotonic=clock)), \
          patch("worker.main.probe_range_support", return_value=False), \
          patch("worker.main.download_to_file", return_value=(str(tmp_path / "v.mp4"), 10)) as dl, \
          patch("worker.main.download_chunk") as dc, \
@@ -229,11 +294,11 @@ async def test_run_once_no_range_fallback_full_download(tmp_path):
          patch("os.unlink") as unlink:
         from worker.main import run_once
         rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+        cb = dl.call_args.kwargs["on_progress"]
+        cb(1, 2, 0.1)
     assert rc == 0
     dl.assert_called_once()
     dc.assert_not_called()
-    cb = dl.call_args.kwargs["on_progress"]
-    cb(1, 2, 0.1)
     q.touch.assert_called_with("JOB-1")
     q.set_checkpoint.assert_called_with("JOB-1", "dl:full")
 
@@ -284,7 +349,9 @@ async def test_run_once_chunked_reset_retry_once_then_success(tmp_path):
     q = MagicMock()
     q.next_job.return_value = make_job()
     q.claim.return_value = True
+    clock = scripted_clock(1000.0)
     with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.time", MagicMock(monotonic=clock)), \
          patch("worker.main.probe_range_support", return_value=True), \
          patch("worker.main.download_chunk", side_effect=[
              DownloadError("part file 0 bytes != checkpoint 100 — cần reset checkpoint"),
@@ -299,13 +366,13 @@ async def test_run_once_chunked_reset_retry_once_then_success(tmp_path):
          patch("os.unlink") as unlink:
         from worker.main import run_once
         rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+        cb = dc.call_args_list[0].kwargs["on_progress"]
+        cb(1, 2, 0.1)
     assert rc == 0
     assert dc.call_args_list == [
         call("https://x/v.mp4", start=100, dest_dir=str(tmp_path), on_progress=ANY),
         call("https://x/v.mp4", start=0, dest_dir=str(tmp_path), on_progress=ANY),
     ]
-    cb = dc.call_args_list[0].kwargs["on_progress"]
-    cb(1, 2, 0.1)
     q.touch.assert_called_with("JOB-1")
     q.set_checkpoint.assert_any_call("JOB-1", "dl:0")
     q.set_checkpoint.assert_any_call("JOB-1", "dl:50")
