@@ -9,8 +9,9 @@ from pathlib import Path
 
 import requests
 
-# 2GB trừ 1 part 512KB — an toàn biên cho Telegram non-premium
-TELEGRAM_MAX = 2 * 1024**3 - 512 * 1024
+# Telegram chặn upload quanh 2GB; thực tế 1.94GB đã bị từ chối.
+# 1.9 GB decimal + yêu cầu strictly < để chắc chắn qua.
+TELEGRAM_MAX = 1_900_000_000
 CHUNK_SIZE = 256 * 1024 * 1024  # 256MB/chunk — session ngắn tự nhiên
 
 log = logging.getLogger("worker")
@@ -18,6 +19,10 @@ log = logging.getLogger("worker")
 
 class DownloadError(Exception):
     pass
+
+
+class OversizeError(DownloadError):
+    """File vượt TELEGRAM_MAX — caller có thể thử nguồn dự phòng."""
 
 
 def _total_bytes(resp) -> int | None:
@@ -30,6 +35,83 @@ def _total_bytes(resp) -> int | None:
         return int(raw)
     except ValueError:
         return None
+
+
+def _last_header_block(raw: str) -> str:
+    blocks = [b for b in raw.replace("\r\n", "\n").split("\n\n") if b.strip()]
+    return blocks[-1] if blocks else ""
+
+
+def _header_value(block: str, name: str) -> str | None:
+    prefix = name.lower() + ":"
+    for line in block.splitlines():
+        if line.lower().startswith(prefix):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def probe_size_curl(url: str, timeout_s: int = 20) -> int | None:
+    """Đo size bằng curl Range 0-0; None nếu không đọc được header.
+
+    curl -sS -L -r 0-0 -D - -o /dev/null --max-time N --max-filesize 1M URL
+
+    - 206 -> Content-Range: bytes 0-0/TOTAL  (đường đi bình thường)
+    - 200 (server bỏ qua Range) -> Content-Length: TOTAL
+    - None = curl lỗi/không có curl/không có total — caller coi là "chưa biết".
+
+    Không tải body: `-r 0-0` + `-o /dev/null`, `--max-filesize` chặn trường
+    hợp server trả cả file.
+    """
+    try:
+        proc = subprocess.run(
+            ["curl", "-sS", "-L", "-r", "0-0", "-D", "-", "-o", os.devnull,
+             "--max-time", str(timeout_s), "--max-filesize", "1048576", url],
+            capture_output=True, text=True, timeout=timeout_s + 5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    block = _last_header_block(proc.stdout or "")
+    if not block:
+        return None
+    status = block.splitlines()[0]
+    if " 206" in status:
+        raw = _header_value(block, "Content-Range") or ""
+        total = raw.rsplit("/", 1)[-1]
+        return int(total) if total.isdigit() else None
+    if " 200" in status:
+        raw = _header_value(block, "Content-Length") or ""
+        return int(raw) if raw.isdigit() else None
+    return None
+
+
+def _fmt_size(n: int) -> str:
+    return f"{n / 1_000_000_000:.2f} GB"
+
+
+def choose_source(primary: str, alt: str, max_bytes: int,
+                  probe=probe_size_curl) -> tuple[str | None, str | None]:
+    """Chọn URL tải. Trả (url, None) hoặc (None, lý do từ chối).
+
+    Ngưỡng dùng strictly `<`: size == max_bytes cũng bị từ chối.
+    """
+    if not alt or alt == primary:
+        size = probe(primary)
+        if size is not None and size >= max_bytes:
+            return None, (f"file vượt giới hạn {_fmt_size(max_bytes)}: "
+                          f"chỉ có 1 bản ({_fmt_size(size)})")
+        return primary, None
+
+    primary_size = probe(primary)
+    if primary_size is None or primary_size < max_bytes:
+        return primary, None
+
+    alt_size = probe(alt)
+    if alt_size is None or alt_size < max_bytes:
+        return alt, None
+
+    return None, (f"file vượt giới hạn {_fmt_size(max_bytes)}: bản cao nhất "
+                  f"{_fmt_size(primary_size)}, bản kế {_fmt_size(alt_size)}")
 
 
 def probe_range_support(url: str) -> bool:
@@ -63,8 +145,10 @@ def download_chunk(url: str, start: int, dest_dir: str, chunk_size: int = CHUNK_
             for chunk in resp.iter_content(1024 * 1024):
                 if chunk:
                     got += len(chunk)
-                    if start + got > TELEGRAM_MAX:
-                        raise DownloadError(f"file vượt giới hạn 2GB: {start + got} bytes")
+                    if start + got >= TELEGRAM_MAX:
+                        raise OversizeError(
+                            f"file vượt giới hạn {_fmt_size(TELEGRAM_MAX)}: "
+                            f"{start + got} bytes")
                     f.write(chunk)
                     if on_progress is not None:
                         try:
@@ -111,8 +195,9 @@ def download_to_file(url: str, dest_dir: str, max_bytes: int = TELEGRAM_MAX,
             declared_len = int(declared)
         except ValueError:
             raise DownloadError(f"Content-Length không hợp lệ: {declared!r}") from None
-        if declared_len > max_bytes:
-            raise DownloadError(f"file vượt giới hạn 2GB: {declared_len} bytes")
+        if declared_len >= max_bytes:
+            raise OversizeError(
+                f"file vượt giới hạn {_fmt_size(max_bytes)}: {declared_len} bytes")
 
     t0 = time.monotonic()
     size = 0
@@ -122,8 +207,10 @@ def download_to_file(url: str, dest_dir: str, max_bytes: int = TELEGRAM_MAX,
                 if not chunk:
                     continue
                 size += len(chunk)
-                if size > max_bytes:
-                    raise DownloadError(f"file vượt giới hạn 2GB giữa luồng: {size} bytes")
+                if size >= max_bytes:
+                    raise OversizeError(
+                        f"file vượt giới hạn {_fmt_size(max_bytes)} giữa luồng: "
+                        f"{size} bytes")
                 f.write(chunk)
                 if on_progress is not None:
                     try:
