@@ -127,19 +127,20 @@ function doPost(e) {
 
     sendTelegramMessage(chatId, "⏳ Đang phân tích link X...");
 
-    // ---- Resolve MP4 (cùng logic getxbot như bot cũ) ----
-    var mp4Url = getHighestQualityVideo(match[1]);
-    console.log('PIPELINE-RESOLVE link=' + match[1] + ' → ' + (mp4Url ? 'OK' : 'FAIL'));
-    if (!mp4Url) {
+    // ---- Resolve MP4 candidates: best + strictly lower bitrate alt ----
+    var cand = getVideoCandidates(match[1]);
+    console.log('PIPELINE-RESOLVE link=' + match[1] + ' → ' + (cand ? 'OK' : 'FAIL')
+        + (cand && cand.altUrl ? ' (có bản dự phòng)' : ''));
+    if (!cand) {
       sendTelegramMessage(chatId,
           "❌ Không resolve được video. Kiểm tra link (tweet có video?) rồi thử lại.");
       return _ok200('ok');
     }
 
     // ---- Chống trùng: job đang chờ/đang chạy HOẶC DONE trong 24h ----
-    var dupJob = isQueuedOrRecent(mp4Url, statusId);
+    var dupJob = isQueuedOrRecent([cand.url, cand.altUrl], statusId);
     if (dupJob) {
-      console.log('PIPELINE-DUP ' + mp4Url + ' → job ' + dupJob);
+      console.log('PIPELINE-DUP ' + cand.url + ' → job ' + dupJob);
       var dupMsg = 'ℹ️ Video này đã có trong hàng đợi hoặc đã upload (job ' + dupJob + '). Không tạo lại.';
       if (statusId) {
         dupMsg += ' (media_key=' + statusId + ')';
@@ -156,11 +157,14 @@ function doPost(e) {
     }
 
     // ---- Tạo job + dispatch worker ngay ----
-    var jobId = pipelineCreateJobAndDispatch(mp4Url, chatId, statusId);
+    var jobId = pipelineCreateJobAndDispatch(cand.url, cand.altUrl, chatId, statusId);
     console.log('PIPELINE-JOB ' + jobId + ' chat=' + chatId);
+    var note = cand.altUrl
+        ? '\n🔁 Nếu bản gốc quá 1.9GB, sẽ tự dùng bản chất lượng thấp hơn.'
+        : '';
     sendTelegramMessage(chatId,
         "✅ Đã tạo job " + jobId + "\n" +
-        "🎬 Video đang được tải và upload lên kênh (vài phút tuỳ dung lượng).\n" +
+        "🎬 Video đang được tải và upload lên kênh (vài phút tuỳ dung lượng)." + note + "\n" +
         "Bạn sẽ nhận thông báo ✅/❌ khi xong.");
 
   } catch (error) {
@@ -178,17 +182,15 @@ function doPost(e) {
 }
 
 // ----------------------------------------------------------------------------
-// Resolve video bitrate cao nhất từ getxbot.com/api/parse
-// (giữ nguyên logic bot cũ, lược bớt tin nhắn debug trung gian)
+// Chọn 2 URL MP4: chất lượng cao nhất + một bậc thấp hơn (bitrate thấp hơn hẳn).
+// getxbot trả list variant: { bitrate, content_type, url, size: "720x1280" }.
+// `size` ở đây là ĐỘ PHÂN GIẢI, KHÔNG phải byte — không dùng để đo dung lượng.
 // ----------------------------------------------------------------------------
-function getHighestQualityVideo(xUrl) {
+function getVideoCandidates(xUrl) {
   var options = {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({ videoId: xUrl, p: 1 }),
-    // timeoutSeconds 15: getxbot chậm/treo từ IP Google → không timeout sẽ
-    // treo doPost 360s (default) → Telegram drop update sau 60s → im lặng
-    // tuyệt đối (đã xảy ra 09:26 17-09). 15s đủ cho getxbot bình thường.
     muteHttpExceptions: true,
     timeoutSeconds: 15
   };
@@ -199,19 +201,36 @@ function getHighestQualityVideo(xUrl) {
 
     var videoKey = Object.keys(resData.data)[0];
     if (!videoKey) return null;
-    var videoList = resData.data[videoKey];
-    if (!videoList || videoList.length === 0) return null;
+    var videoList = resData.data[videoKey] || [];
 
-    var maxBitrate = -1;
-    var bestVideoUrl = '';
+    var items = [];
     for (var i = 0; i < videoList.length; i++) {
-      if (videoList[i].bitrate > maxBitrate) {
-        maxBitrate = videoList[i].bitrate;
-        bestVideoUrl = videoList[i].url;
+      var v = videoList[i];
+      if (!v || !v.url) continue;
+      if (v.content_type && v.content_type !== 'video/mp4') continue;
+      items.push({
+        url: String(v.url).split('?tag')[0],
+        bitrate: Number(v.bitrate) || 0
+      });
+    }
+
+    var positive = [];
+    for (var p = 0; p < items.length; p++) {
+      if (items[p].bitrate > 0) positive.push(items[p]);
+    }
+    var pool = positive.length ? positive : items;  // GIF: chỉ có 1 entry bitrate 0
+    pool.sort(function (a, b) { return b.bitrate - a.bitrate; });
+    if (!pool.length) return null;
+
+    var best = pool[0];
+    var alt = '';
+    for (var j = 1; j < pool.length; j++) {
+      if (pool[j].url !== best.url && pool[j].bitrate < best.bitrate) {
+        alt = pool[j].url;
+        break;
       }
     }
-    if (!bestVideoUrl) return null;
-    return bestVideoUrl.split('?tag')[0];
+    return { url: best.url, altUrl: alt };
   } catch (e) {
     return null;
   }
@@ -221,7 +240,7 @@ function getHighestQualityVideo(xUrl) {
 // Pipeline: tạo job vào Sheet queue + repository_dispatch (bản sao
 // gas/telegram-pipeline.gs — hợp đồng cột PHẢI khớp worker/sheet_queue.py)
 // ----------------------------------------------------------------------------
-function pipelineCreateJobAndDispatch(mp4Url, chatId, statusId) {
+function pipelineCreateJobAndDispatch(mp4Url, mp4AltUrl, chatId, statusId) {
   var props = PropertiesService.getScriptProperties();
   var sheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID'))
       .getSheetByName('Jobs');
@@ -231,12 +250,14 @@ function pipelineCreateJobAndDispatch(mp4Url, chatId, statusId) {
   var now = Math.floor(Date.now() / 1000);
   var jobId = 'JOB-' + Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss')
       + '-' + Math.random().toString(36).slice(2, 8);
-  // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id, error, retry_count, checkpoint, media_key
-  var base = [jobId, 'PENDING', mp4Url, String(chatId), String(now), '', '', '', '', '0', '0'];
-  if (statusId) {
-    base.push(statusId);
-  }
-  sheet.appendRow(base);
+  // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id,
+  // error, retry_count, checkpoint, media_key, url_alt
+  sheet.appendRow([
+    jobId, 'PENDING', mp4Url, String(chatId), String(now), '',
+    '', '', '', '0', '0',
+    statusId ? String(statusId) : '',
+    mp4AltUrl ? String(mp4AltUrl) : ''
+  ]);
   dispatchToGitHub(jobId);
   return jobId;
 }
@@ -320,7 +341,8 @@ function debugToOwner(text) {
 
 // Trả về job_id nếu cùng video đang chờ/đang chạy (status != FAILED) HOẶC đã DONE trong 24h.
 // Trả về null nếu chưa có gì ⇒ được tạo job mới. Job FAILED thì cho gửi lại.
-function isQueuedOrRecent(mp4Url, statusId) {
+function isQueuedOrRecent(urls, statusId) {
+  var wanted = urls || [];
   try {
     var rows = jobsSheet().getDataRange().getValues();
     var now = Math.floor(Date.now() / 1000);
@@ -333,7 +355,12 @@ function isQueuedOrRecent(mp4Url, statusId) {
       }
       var rowMediaKey = String(rows[i][11] || '');
       if (statusId && rowMediaKey && rowMediaKey === statusId) return String(rows[i][0]);
-      if (!statusId && String(rows[i][2]) === mp4Url) return String(rows[i][0]);
+      if (!statusId) {
+        var rowUrls = [String(rows[i][2] || ''), String(rows[i][12] || '')];
+        for (var u = 0; u < wanted.length; u++) {
+          if (wanted[u] && rowUrls.indexOf(wanted[u]) >= 0) return String(rows[i][0]);
+        }
+      }
     }
   } catch (e) {
     console.warn('isQueuedOrRecent lỗi (bỏ qua, cho phép tạo job): ' + e);

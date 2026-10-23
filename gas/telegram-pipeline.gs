@@ -6,13 +6,15 @@
 /**
  * Gọi từ doPost() sau khi đã resolve ra link MP4.
  * Ví dụ trong doPost:
- *   var mp4Url = resolveXToMp4(xUrl);       // logic sẵn có của bạn
- *   pipelineCreateJobAndDispatch(mp4Url, chatId);
- * @param {string} mp4Url URL trực tiếp tới file .mp4
+ *   var cand = getVideoCandidates(xUrl);              // {url, altUrl} | null
+ *   pipelineCreateJobAndDispatch(cand.url, cand.altUrl, chatId, statusId);
+ * @param {string} mp4Url URL chính tới file .mp4
+ * @param {string} mp4AltUrl URL dự phòng bitrate thấp hơn (rỗng nếu không có)
  * @param {number} chatId chat_id của người gửi request (để ghi vết)
+ * @param {string} [statusId] status id của tweet, dùng làm media_key cột 12
  * @return {string} job_id đã tạo
  */
-function pipelineCreateJobAndDispatch(mp4Url, chatId) {
+function pipelineCreateJobAndDispatch(mp4Url, mp4AltUrl, chatId, statusId) {
   var props = PropertiesService.getScriptProperties();
   var sheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID'))
       .getSheetByName('Jobs');
@@ -22,9 +24,10 @@ function pipelineCreateJobAndDispatch(mp4Url, chatId) {
   var now = Math.floor(Date.now() / 1000);
   var jobId = 'JOB-' + Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss')
       + '-' + Math.random().toString(36).slice(2, 8);
-  // Thứ tự cột PHẢI khớp COLUMNS của worker/sheet_queue.py:
-  // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id, error, retry_count, checkpoint
-  sheet.appendRow([jobId, 'PENDING', mp4Url, String(chatId), String(now), '', '', '', '', '0', '0']);
+  // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id,
+  // error, retry_count, checkpoint, media_key, url_alt
+  sheet.appendRow([jobId, 'PENDING', mp4Url, String(chatId), String(now),
+                   '', '', '', '', '0', '0', '', '']);
   dispatchToGitHub(jobId);
   return jobId;
 }
