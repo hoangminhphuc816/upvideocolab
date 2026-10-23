@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, ANY, call, patch
 import pytest
 
 from worker.config import Config
-from worker.downloader import CHUNK_SIZE, DownloadError
+from worker.downloader import CHUNK_SIZE, DownloadError, OversizeError
 from worker.sheet_queue import Job
 
 
@@ -185,8 +185,104 @@ def test_run_sweep_notifies_newly_failed():
     nf.assert_called_once()
 
 
+@pytest.fixture(autouse=True)
+def _stub_choose_source(monkeypatch):
+    """Test cũ không chạm curl/network; test mới override bằng patch."""
+    monkeypatch.setattr(
+        "worker.main.choose_source",
+        lambda primary, alt, max_bytes: (primary, None),
+    )
+
+
+def make_job_addr(url="https://x/v.mp4", url_alt=""):
+    job = make_job()
+    job.url = url
+    job.url_alt = url_alt
+    return job
+
+
+@pytest.mark.asyncio
+async def test_run_once_tu_choi_som_khi_1_ban_qua_nguong(tmp_path):
+    q = MagicMock()
+    q.next_job.return_value = make_job_addr()   # không có alt
+    q.claim.return_value = True
+    reason = "file vượt giới hạn 1.90 GB: chỉ có 1 bản (2.10 GB)"
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.choose_source", return_value=(None, reason)), \
+         patch("worker.main.download_to_file") as dl, \
+         patch("worker.main.download_chunk") as dc, \
+         patch("worker.main.notify_failed") as nf:
+        from worker.main import run_once
+        rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+    assert rc == 2
+    dl.assert_not_called(); dc.assert_not_called()
+    assert statuses_written(q) == ["DOWNLOADING", "FAILED"]
+    nf.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_once_chon_ban_ke_khi_ban_goc_qua_nguong(tmp_path):
+    q = MagicMock()
+    q.next_job.return_value = make_job_addr(url_alt="https://x/lo.mp4")
+    q.claim.return_value = True
+    fake = tmp_path / "v.mp4"; fake.write_bytes(b"")
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.choose_source", return_value=("https://x/lo.mp4", None)), \
+         patch("worker.main.probe_range_support", return_value=False), \
+         patch("worker.main.download_to_file", return_value=(str(fake), 10)) as dl, \
+         patch("worker.main.validate_video"), \
+         patch("worker.main.upload_to_channel", AsyncMock(return_value=1)), \
+         patch("worker.main.notify_done"), \
+         patch("worker.main.notify_failed"):
+        from worker.main import run_once
+        rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+    assert rc == 0
+    assert dl.call_args.args[0] == "https://x/lo.mp4"
+    q.set_checkpoint.assert_any_call("JOB-1", "dl:0")
+
+
+@pytest.mark.asyncio
+async def test_run_once_oversize_giua_luong_chuyen_ban_ke(tmp_path):
+    q = MagicMock()
+    q.next_job.return_value = make_job_addr(url_alt="https://x/lo.mp4")
+    q.claim.return_value = True
+    (tmp_path / "video.part").write_bytes(b"x")   # part cua ban goc phai bi xoa
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.choose_source", return_value=("https://x/v.mp4", None)), \
+         patch("worker.main.probe_range_support", return_value=True), \
+         patch("worker.main.download_chunk",
+               side_effect=[OversizeError("file vượt giới hạn 1.90 GB"),
+                            ("/tmp/p.part", 100)]) as dc, \
+         patch("worker.main.checkpoint_dl_bytes", return_value=0), \
+         patch("worker.main.assemble", return_value=str(tmp_path / "video.mp4")), \
+         patch("worker.main.validate_video"), \
+         patch("worker.main.upload_to_channel", AsyncMock(return_value=1)), \
+         patch("worker.main.notify_done"), \
+         patch("worker.main.notify_failed"):
+        from worker.main import run_once
+        rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+    assert rc == 0
+    assert dc.call_args_list == [
+        call("https://x/v.mp4", start=0, dest_dir=str(tmp_path), on_progress=ANY),
+        call("https://x/lo.mp4", start=0, dest_dir=str(tmp_path), on_progress=ANY),
+    ]
+    q.set_checkpoint.assert_any_call("JOB-1", "dl:0")
+    assert not (tmp_path / "video.part").exists()
+
+
 def test_permanent_substrings():
     from worker.main import _permanent
+    assert _permanent("HTTP 400")
+    assert _permanent("HTTP 403")
+    assert _permanent("HTTP 404")
+    assert _permanent("HTTP 410")
+    assert _permanent("vượt giới hạn")
+    assert _permanent("file rỗng")
+    assert _permanent("ffprobe")
+    assert _permanent("PeerIdInvalid")
+    assert _permanent("ChatWriteForbidden")
+    assert not _permanent("mất kết nối giữa chừng")
+    assert not _permanent("không kết nối được Telegram: timeout")
     assert _permanent("HTTP 400 khi tải")
     assert _permanent("HTTP 403 khi tải")
     assert _permanent("HTTP 404 khi tải")
