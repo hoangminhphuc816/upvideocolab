@@ -275,11 +275,12 @@ python -m controller.colab_dispatch
 ### e) Fallback chất lượng vượt 1.9GB
 
 1. Gửi link X có video vượt ngưỡng (bản 1080p >= 1.9GB, bản 720p dưới).
-2. Kỳ vọng: Sheet có `url` = bản 1080p, `url_alt` = bản 720p; log worker có
-   `curl -r 0-0` cho 2 URL; worker chọn bản 720p; job DONE.
+2. Kỳ vọng: Sheet có `url` = bản 1080p, `url_alt` = bản 720p; worker chọn bản 720p; job DONE.
+   Probes `curl -r 0-0` không ghi log — xác minh qua `url_alt` trên Sheet,
+   kết quả DONE với bản thấp hơn, hoặc lý do FAILED.
 3. Cả 2 bản >= 1.9GB: FAILED sớm (0 byte tải) với «vượt giới hạn 1.90 GB:
    bản cao nhất …, bản kế …»; bot báo ❌.
-4. Chỉ 1 bản >= 1.9GB: FAILED sớm với «chỉ có 1 bản».
+4. Chỉ có 1 bản duy nhất (không có url_alt) và bản đó >= 1.9GB: FAILED sớm với «chỉ có 1 bản».
 5. File đúng 1,900,000,000 byte cũng phải FAILED (strictly `<`).
 6. Kiểm tra tay trên Colab:
    `curl -sS -L -r 0-0 -D - -o /dev/null --max-time 20 '<url>'`

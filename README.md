@@ -45,7 +45,7 @@ GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab
 ## Deploy
 
 Xem `runbook.md` — setup secrets (`COLAB_TOKEN_JSON`, `WORKER_REPO`), Sheet
-11 cột (`+ checkpoint`), service account, GAS, và checklist test tích hợp
+13 cột (+ checkpoint, media_key, url_alt), service account, GAS, và checklist test tích hợp
 (local smoke 100MB → Actions 1.5GB → E2E → chunk recovery).
 
 ## Chi tiết thiết kế
