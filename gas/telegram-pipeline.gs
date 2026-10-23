@@ -27,7 +27,9 @@ function pipelineCreateJobAndDispatch(mp4Url, mp4AltUrl, chatId, statusId) {
   // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id,
   // error, retry_count, checkpoint, media_key, url_alt
   sheet.appendRow([jobId, 'PENDING', mp4Url, String(chatId), String(now),
-                   '', '', '', '', '0', '0', '', '']);
+                   '', '', '', '', '0', '0',
+                   statusId ? String(statusId) : '',
+                   mp4AltUrl ? String(mp4AltUrl) : '']);
   dispatchToGitHub(jobId);
   return jobId;
 }

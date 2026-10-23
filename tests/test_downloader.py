@@ -161,6 +161,8 @@ def test_probe_curl_206_dung_content_range():
         assert probe_size_curl("https://x/v.mp4") == 157286400
     cmd = run.call_args.args[0]
     assert "-r" in cmd and "0-0" in cmd and os.devnull in cmd
+    assert "--max-time" in cmd and "20" in cmd
+    assert "--max-filesize" in cmd and str(1_048_576) in cmd
 
 
 def test_probe_curl_200_dung_content_length():

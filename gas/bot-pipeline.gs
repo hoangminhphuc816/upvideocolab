@@ -187,6 +187,9 @@ function doPost(e) {
 // `size` ở đây là ĐỘ PHÂN GIẢI, KHÔNG phải byte — không dùng để đo dung lượng.
 // ----------------------------------------------------------------------------
 function getVideoCandidates(xUrl) {
+  // getxbot từ Google IPs có thể chậm/hang; mặc định 360s sẽ kẹt doPost
+  // quá 60s update timeout của Telegram và lặng lẽ drop update.
+  // 15s đủ dùng bình thường.
   var options = {
     method: 'post',
     contentType: 'application/json',

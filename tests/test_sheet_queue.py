@@ -9,7 +9,8 @@ from worker.config import Config
 from worker.sheet_queue import SheetQueue, Job, COLUMNS
 
 # COLUMNS (đúng thứ tự): job_id, status, url, chat_id, created_at, updated_at,
-#                        worker, msg_id, error, retry_count, checkpoint
+#                        worker, msg_id, error, retry_count, checkpoint,
+#                        media_key, url_alt
 HDR = list(COLUMNS)
 
 
@@ -199,7 +200,6 @@ def test_append_job_creates_pending_row():
 
 
 def test_columns_contract_13_va_thu_tu_media_key_url_alt():
-    from worker.sheet_queue import COLUMNS
     assert len(COLUMNS) == 13
     assert COLUMNS[10] == "checkpoint"
     assert COLUMNS[11] == "media_key"

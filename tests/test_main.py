@@ -270,6 +270,47 @@ async def test_run_once_oversize_giua_luong_chuyen_ban_ke(tmp_path):
     assert not (tmp_path / "video.part").exists()
 
 
+@pytest.mark.asyncio
+async def test_run_once_both_candidates_oversize(tmp_path):
+    q = MagicMock()
+    q.next_job.return_value = make_job_addr(url_alt="https://x/lo.mp4")
+    q.claim.return_value = True
+    reason = "file vượt giới hạn 1.90 GB: bản cao nhất 2.50 GB, bản kế 2.10 GB"
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.choose_source", return_value=(None, reason)), \
+         patch("worker.main.download_to_file") as dl, \
+         patch("worker.main.download_chunk") as dc, \
+         patch("worker.main.notify_failed") as nf:
+        from worker.main import run_once
+        rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+    assert rc == 2
+    dl.assert_not_called(); dc.assert_not_called()
+    assert statuses_written(q) == ["DOWNLOADING", "FAILED"]
+    nf.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_once_alt_last_candidate_oversize_reraises(tmp_path):
+    q = MagicMock()
+    q.next_job.return_value = make_job_addr(url_alt="https://x/lo.mp4")
+    q.claim.return_value = True
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.choose_source",
+               return_value=("https://x/lo.mp4", None)), \
+         patch("worker.main.probe_range_support", return_value=True), \
+         patch("worker.main.download_chunk",
+               side_effect=OversizeError("file vượt giới hạn 1.90 GB")) as dc, \
+         patch("worker.main.checkpoint_dl_bytes", return_value=0), \
+         patch("worker.main.notify_failed") as nf:
+        from worker.main import run_once
+        rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+    assert rc == 2
+    dc.assert_called_once()
+    assert dc.call_args.args[0] == "https://x/lo.mp4"
+    assert statuses_written(q) == ["DOWNLOADING", "FAILED"]
+    nf.assert_called_once()
+
+
 def test_permanent_substrings():
     from worker.main import _permanent
     assert _permanent("HTTP 400")
