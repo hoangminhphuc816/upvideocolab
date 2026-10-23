@@ -198,10 +198,32 @@ def test_append_job_creates_pending_row():
     assert row[10] == "0"
 
 
-def test_checkpoint_column_appended():
+def test_columns_contract_13_va_thu_tu_media_key_url_alt():
     from worker.sheet_queue import COLUMNS
-    assert COLUMNS[-1] == "checkpoint"
-    assert len(COLUMNS) == 11
+    assert len(COLUMNS) == 13
+    assert COLUMNS[10] == "checkpoint"
+    assert COLUMNS[11] == "media_key"
+    assert COLUMNS[12] == "url_alt"
+
+
+def test_append_job_ghi_du_13_o():
+    q = q_with([HDR], now_ts=1234)
+    q.append_job("https://x/v.mp4", 42, job_id="JOB-X", url_alt="https://x/lo.mp4")
+    row = q.sheet.rows[1]
+    assert len(row) == 13
+    assert row[11] == ""                       # media_key
+    assert row[12] == "https://x/lo.mp4"       # url_alt
+
+
+def test_parse_row_doc_url_alt_va_tuong_thich_dong_cu():
+    rows = [HDR,
+            ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0",
+             "1882872996031066248", "https://x/lo.mp4"]]
+    q = q_with(rows)
+    assert q._parse_row(2, rows[1]).url_alt == "https://x/lo.mp4"
+
+    legacy = ["JOB-2", "PENDING", "u2", "42", "100", "", "", "", "", "0", "0"]
+    assert q._parse_row(3, legacy).url_alt == ""
 
 
 def test_checkpoint_parse_roundtrip():

@@ -17,7 +17,8 @@ import gspread
 from worker.config import Config
 
 COLUMNS = ["job_id", "status", "url", "chat_id", "created_at", "updated_at",
-           "worker", "msg_id", "error", "retry_count", "checkpoint"]
+           "worker", "msg_id", "error", "retry_count", "checkpoint",
+           "media_key", "url_alt"]
 STATUSES = ["PENDING", "CLAIMED", "DOWNLOADING", "UPLOADING", "DONE", "FAILED", "RETRY"]
 SWEEPABLE = ("CLAIMED", "DOWNLOADING", "UPLOADING")  # PENDING = chưa từng thử ⇒ không phải stale
 
@@ -36,6 +37,7 @@ class Job:
     retry_count: int
     checkpoint: str
     row_index: int  # 1-based, tính cả dòng header
+    url_alt: str = ""
 
 
 class SheetQueue:
@@ -76,10 +78,11 @@ class SheetQueue:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         return f"JOB-{stamp}-{uuid.uuid4().hex[:6]}"
 
-    def append_job(self, url: str, chat_id: int, job_id: str | None = None) -> str:
+    def append_job(self, url: str, chat_id: int, job_id: str | None = None,
+                   url_alt: str = "") -> str:
         job_id = job_id or self.new_job_id()
         row = [job_id, "PENDING", url, str(chat_id), str(self._now_ts()),
-               "", "", "", "", "0", "0"]
+               "", "", "", "", "0", "0", "", url_alt]
         self.sheet.append_row(row)
         return job_id
 
@@ -130,6 +133,7 @@ class SheetQueue:
             retry_count=self._to_int(cell("retry_count")),
             checkpoint=cell("checkpoint") or "0",
             row_index=i,
+            url_alt=cell("url_alt"),
         )
 
     def claim(self, job_id: str, worker_id: str) -> bool:
