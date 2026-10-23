@@ -2,8 +2,10 @@
 
 Hệ thống $0, không VPS: bot Telegram nhận request → GAS resolve + queue
 (Google Sheet) → Colab VM (qua Colab CLI) tải MP4 và upload vào kênh riêng tư
-qua Telethon (MTProto, 2GB/file); GitHub Actions chỉ làm controller/watchdog
-(KHÔNG tải video).
+qua Telethon (MTProto, 2GB/file); GitHub Actions chỉ làm controller/watchdog.
+Ngưỡng an toàn trong code là 1.9GB (file 1.94GB đã bị Telegram từ chối):
+GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab đo bằng
+`curl -r 0-0` (không tải body) và tự chuyển bản kế.
 
 ## Kiến trúc
 
@@ -50,3 +52,7 @@ Xem `runbook.md` — setup secrets (`COLAB_TOKEN_JSON`, `WORKER_REPO`), Sheet
 
 - Anti-abuse v3: session ngắn tự nhiên, KHÔNG keep-alive/hard-limit; checkpoint
   chunk resume trên Sheet; Colab CLI chính thức; `COLAB_TOKEN_JSON` KHÔNG xuống VM.
+- Fallback ngưỡng 1.9GB: `getVideoCandidates` (GAS) chọn best + một bậc bitrate
+  thấp hơn; cột `url_alt` (13); `probe_size_curl` + `choose_source` chạy trên
+  Colab (curl Range 0-0, không tải body, không dính CORS); `OversizeError`
+  giữa luồng → đổi nguồn 1 lần. So sánh strictly `<`.

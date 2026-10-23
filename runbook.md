@@ -101,9 +101,12 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
 
 1. Tạo Google Sheet mới, đặt tên tab là `Jobs` (chính xác).
 2. Dòng 1 paste header đúng thứ tự:
-   `job_id  status  url  chat_id  created_at  updated_at  worker  msg_id  error  retry_count  checkpoint`
+   `job_id  status  url  chat_id  created_at  updated_at  worker  msg_id  error  retry_count  checkpoint  media_key  url_alt`
 3. Ghi Sheet ID (trong URL giữa `/d/` và `/edit`) → Actions secret `SHEET_ID`
    và GAS Script Property `SHEET_ID`.
+   > Sheet cũ 11/12 cột vẫn chạy: worker đọc ô thiếu thành rỗng. Chỉ cần thêm
+   > tiêu đề `media_key` (cột L) và `url_alt` (cột M) cho dễ đọc — logic dùng
+   > vị trí cột, không đọc tên.
 
 ## 5. GCP service account (worker đọc/ghi Sheet)
 
@@ -212,8 +215,9 @@ không bị đụng tới, vẫn chạy làm backup. Bot mới chỉ chấp nh�
 
 > `gas/telegram-pipeline.gs` (module chỉ có pipeline) giữ lại cho phương án B:
 > muốn bot CŨ trực tiếp tạo job — dán module đó vào project bot cũ rồi gọi
-> `pipelineCreateJobAndDispatch(mp4Url, chatId)` trong `doPost` (nhưng bot cũ
-> hiện KHÔNG có whitelist — ai biết bot là nhắn được, chưa khắc phục).
+> `pipelineCreateJobAndDispatch(mp4Url, mp4AltUrl, chatId, statusId)` trong `doPost` (nhưng bot cũ
+> hiện KHÔNG có whitelist — ai biết bot là nhắn được, chưa khắc phục). Module này cần
+> host project cung cấp `getVideoCandidates`.
 
 ## 9. Test tích hợp thật (theo thứ tự)
 
@@ -268,6 +272,19 @@ python -m controller.colab_dispatch
    mount (không dùng trong pipeline này).
 5. Lặp để `retry_count` đạt 3 → sweep lần nữa → `FAILED` + tin ❌.
 
+### e) Fallback chất lượng vượt 1.9GB
+
+1. Gửi link X có video vượt ngưỡng (bản 1080p >= 1.9GB, bản 720p dưới).
+2. Kỳ vọng: Sheet có `url` = bản 1080p, `url_alt` = bản 720p; log worker có
+   `curl -r 0-0` cho 2 URL; worker chọn bản 720p; job DONE.
+3. Cả 2 bản >= 1.9GB: FAILED sớm (0 byte tải) với «vượt giới hạn 1.90 GB:
+   bản cao nhất …, bản kế …»; bot báo ❌.
+4. Chỉ 1 bản >= 1.9GB: FAILED sớm với «chỉ có 1 bản».
+5. File đúng 1,900,000,000 byte cũng phải FAILED (strictly `<`).
+6. Kiểm tra tay trên Colab:
+   `curl -sS -L -r 0-0 -D - -o /dev/null --max-time 20 '<url>'`
+   → `206` + `content-range: bytes 0-0/<total>`.
+
 ## 10. Sự cố thường gặp
 
 | Hiện tượng | Nguyên nhân / xử lý |
@@ -290,6 +307,10 @@ python -m controller.colab_dispatch
 | Exact-multiple 256MB EOF | Worker ghi checkpoint `dl:<bytes>` sau mỗi chunk; EOF guard xử lý boundary 416 |
 | Bot trả "đã upload gần đây" cho link MỚI | Ca tin nhắn đến **không** trích được `statusId` (link không có `/status/<số>`) ⇒ dedup so **URL**, nên khớp nhầm nếu getxbot từng trả URL sai/trùng (cache IP). Đã fix: khi tin nhắn đến **có** `statusId` thì dedup theo cột L `media_key` lấy từ link gốc. Nếu tái diễn: kiểm cột L đã điền khi tạo job + link gửi có kèm `/status/<số>` không |
 | Video resolve "OK" nhưng bot bảo DUP link khác | Cùng nhánh so URL ở trên: khớp nhầm một hàng chưa-FAILED có cùng `url` (getxbot từng trả URL sai cho link khác). Chữa: xoá hàng bị khớp nhầm trong Sheet rồi gửi lại link |
+| Job FAILED «vượt giới hạn 1.90 GB: …» | Cả 2 variant đều >= 1.9GB — không bản nào upload được. Không retry: gửi link khác hoặc chấp nhận không có video. |
+| Job dùng nhầm bản thấp dù bản gốc <1.9GB | Kiểm tra cột `url`/`url_alt`; xem log `PIPELINE-RESOLVE`; sửa `getVideoCandidates` nếu getxbot đổi format. |
+| curl probe trả `None` (không đo được) | Worker vẫn tải bản gốc; guard giữa luồng chặn. Kiểm tra `curl --version` trên Colab, URL hết hạn (403/404), hoặc CDN bỏ Range. |
+| Telegram vẫn từ chối file <1.9GB | Hạ `TELEGRAM_MAX` trong `worker/downloader.py` (một dòng decimal bytes); chạy lại test. |
 
 ## 10b. Kiểm tra GAS
 
