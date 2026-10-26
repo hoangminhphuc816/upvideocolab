@@ -12,11 +12,11 @@ GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab
     Bạn ──/dl <link X>──▶ Bot Telegram ──▶ GAS doPost (webhook)
                                             │ resolve URL (logic sẵn có)
                                             │ INSERT job PENDING/WAITING (Sheet)
-                                            │ POST repository_dispatch (PAT)
+                                            │ POST repository_dispatch (PAT) — chỉ PENDING
                                             ▼
                               GitHub Actions controller (public repo, $0)
-                                            │ peek queue (worker trên VM tự claim verify-after-write)
                                             │ release WAITING sau 00:00 VN
+                                            │ peek queue (worker trên VM tự claim verify-after-write)
                                             │ cấp Colab VM qua colab run bootstrap
                                             ▼
                                    Colab VM worker (ephemeral)
@@ -40,7 +40,7 @@ GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab
 | `worker/notifier.py` | Bot API sendMessage kết quả |
 | `controller/colab_dispatch.py` | Controller: peek queue → `colab run` bootstrap → exit map |
 | `.github/workflows/worker.yml` | Controller workflow: repository_dispatch + cron sweep + workflow_dispatch |
-| `gas/bot-pipeline.gs` | GAS webhook (active): resolve URL, append PENDING/WAITING, dispatch |
+| `gas/bot-pipeline.gs` | GAS webhook (active): resolve URL, append PENDING/WAITING; dispatch chỉ PENDING |
 | `gas/telegram-pipeline.gs` | Bản sao legacy — KHÔNG deploy cùng `bot-pipeline.gs` (trùng tên hàm) |
 | `tools/make_session.py` | Tạo StringSession local 1 lần |
 
