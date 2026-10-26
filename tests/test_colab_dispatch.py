@@ -240,8 +240,6 @@ def test_classify_run_bo_qua_when_status_khong_hop_le(capsys):
 
 
 def test_dispatch_goi_release_waiting_truoc_next_job(tmp_path, monkeypatch):
-    from unittest.mock import ANY
-
     monkeypatch.setenv("WORKER_REPO", "owner/repo")
     q = MagicMock()
     q.release_waiting.return_value = 0
@@ -249,11 +247,12 @@ def test_dispatch_goi_release_waiting_truoc_next_job(tmp_path, monkeypatch):
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run") as run, \
          patch("controller.colab_dispatch.TOKEN_PATH",
-               tmp_path / ".config" / "colab-cli" / "token.json"):
+               tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.day_start_epoch", return_value=123456):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV,
                               colab_token_json="{}")
     assert rc == 0
     assert [c[0] for c in q.method_calls] == ["release_waiting", "next_job"]
-    q.release_waiting.assert_called_once_with(ANY)
+    q.release_waiting.assert_called_once_with(123456)
     q.next_job.assert_called_once()
     run.assert_not_called()

@@ -505,7 +505,7 @@ thống.
 | Dùng CLI chính chủ `google-colab-cli`; `colab run` để VM tự teardown trong `finally` | Không truyền `--keep`, không tự viết keep-alive/heartbeat cho Colab |
 | Runtime CPU mặc định | Không GPU/TPU |
 | 1 tài khoản Google duy nhất | Không SSH/remote desktop/remote proxy; không share/resell quyền truy cập |
-| 4 upload/ngày: chặn ở controller TRƯỚC khi tạo session Colab (`controller/colab_dispatch.py:139-145`); 10 job mới/ngày: chặn ở GAS (`gas/bot-pipeline.gs:35` + `jobsCreatedToday()` tại `:151-156`) khi tạo job | Không containerize/lách anti-abuse; không nhiều tài khoản |
+| 4 upload/ngày: chặn ở controller TRƯỚC khi tạo session Colab (`controller/colab_dispatch.py:160-166`); GAS chỉ dispatch tối đa 10 job mới/ngày, phần vượt cap lưu `WAITING` (không dispatch) và được thả dần sau 00:00 VN (`gas/bot-pipeline.gs:152-166`, `worker/sheet_queue.py:110-134`) | Không containerize/lách anti-abuse; không nhiều tài khoản |
 | Mỗi job 1 session ngắn; release VM ngay khi xong | Không giữ VM idle khi "no active executions" |
 | Giới hạn throughput đủ thấp để tránh nhóm "media serving" | Không dùng Colab làm CDN/file host |
 | Worker log tiến độ thật, tối đa ~1 dòng/15s và chỉ khi có byte mới (không spam iopub) | Không gửi heartbeat thừa; không toggle keep-alive |
