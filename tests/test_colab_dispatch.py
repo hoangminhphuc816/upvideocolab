@@ -5,8 +5,8 @@ import types
 import pytest
 
 from worker.config import Config
-from worker.sheet_queue import Job, STATUSES
-from controller.colab_dispatch import _write_bootstrap, _materialize_token, dispatch_to_colab, _classify_run, day_start_epoch
+from worker.sheet_queue import Job
+from controller.colab_dispatch import _write_bootstrap, _materialize_token, dispatch_to_colab, _classify_run
 
 
 def make_cfg():
@@ -240,6 +240,8 @@ def test_classify_run_bo_qua_when_status_khong_hop_le(capsys):
 
 
 def test_dispatch_goi_release_waiting_truoc_next_job(tmp_path, monkeypatch):
+    from unittest.mock import ANY
+
     monkeypatch.setenv("WORKER_REPO", "owner/repo")
     q = MagicMock()
     q.release_waiting.return_value = 0
@@ -251,6 +253,8 @@ def test_dispatch_goi_release_waiting_truoc_next_job(tmp_path, monkeypatch):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV,
                               colab_token_json="{}")
     assert rc == 0
-    q.release_waiting.assert_called_once()
+    assert [c[0] for c in q.method_calls] == ["release_waiting", "next_job"]
+    assert q.release_waiting.call_count == 1
+    assert q.release_waiting.call_args == ANY
     q.next_job.assert_called_once()
     run.assert_not_called()
