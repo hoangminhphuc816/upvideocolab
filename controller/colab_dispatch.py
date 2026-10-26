@@ -149,6 +149,10 @@ sys.exit(worker_main())
 def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json: str) -> int:
     _materialize_token(colab_token_json)
     queue = SheetQueue(cfg)
+    released = queue.release_waiting(day_start_epoch())
+    if released:
+        print(f"::notice::Đã giải phóng {released} job WAITING sang PENDING "
+              f"(sau 00:00 VN).")
     job = queue.next_job()
     if job is None:
         return 0

@@ -5,8 +5,8 @@ import types
 import pytest
 
 from worker.config import Config
-from worker.sheet_queue import Job
-from controller.colab_dispatch import _write_bootstrap, _materialize_token, dispatch_to_colab, _classify_run
+from worker.sheet_queue import Job, STATUSES
+from controller.colab_dispatch import _write_bootstrap, _materialize_token, dispatch_to_colab, _classify_run, day_start_epoch
 
 
 def make_cfg():
@@ -237,3 +237,20 @@ def test_classify_run_bo_qua_when_status_khong_hop_le(capsys):
     assert "::warning::JOB-1" in out
     assert "status lạ 'GHOST'" in out
     q.set_status.assert_not_called()
+
+
+def test_dispatch_goi_release_waiting_truoc_next_job(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    q = MagicMock()
+    q.release_waiting.return_value = 0
+    q.next_job.return_value = None
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run") as run, \
+         patch("controller.colab_dispatch.TOKEN_PATH",
+               tmp_path / ".config" / "colab-cli" / "token.json"):
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV,
+                              colab_token_json="{}")
+    assert rc == 0
+    q.release_waiting.assert_called_once()
+    q.next_job.assert_called_once()
+    run.assert_not_called()
