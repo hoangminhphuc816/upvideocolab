@@ -150,22 +150,29 @@ function doPost(e) {
     }
 
     // ---- Cap 10 job/ngày (giờ VN) ----
-    if (jobsCreatedToday() >= DAILY_JOB_CAP) {
-      sendTelegramMessage(chatId,
-          '⛔ Hôm nay đã đủ ' + DAILY_JOB_CAP + ' job. Gửi lại sau 00:00 (giờ VN).');
-      return _ok200('ok');
-    }
+    // Vượt cap: vẫn ghi job vào Sheet với status WAITING, KHÔNG dispatch.
+    // Lần dispatch/sweep đầu tiên sau 00:00 VN sẽ chuyển WAITING → PENDING.
+    var atCap = jobsCreatedToday() >= DAILY_JOB_CAP;
+    var jobId = atCap
+        ? pipelineCreateJob(cand.url, cand.altUrl, chatId, statusId, 'WAITING')
+        : pipelineCreateJobAndDispatch(cand.url, cand.altUrl, chatId, statusId);
+    console.log('PIPELINE-JOB ' + jobId + ' chat=' + chatId
+        + (atCap ? ' WAITING' : ' PENDING'));
 
-    // ---- Tạo job + dispatch worker ngay ----
-    var jobId = pipelineCreateJobAndDispatch(cand.url, cand.altUrl, chatId, statusId);
-    console.log('PIPELINE-JOB ' + jobId + ' chat=' + chatId);
-    var note = cand.altUrl
-        ? '\n🔁 Nếu bản gốc quá 1.9GB, sẽ tự dùng bản chất lượng thấp hơn.'
-        : '';
-    sendTelegramMessage(chatId,
-        "✅ Đã tạo job " + jobId + "\n" +
-        "🎬 Video đang được tải và upload lên kênh (vài phút tuỳ dung lượng)." + note + "\n" +
-        "Bạn sẽ nhận thông báo ✅/❌ khi xong.");
+    if (atCap) {
+      sendTelegramMessage(chatId,
+          '⏳ Đã lưu job ' + jobId + ' vào hàng đợi.\n' +
+          'Hôm nay đã đủ ' + DAILY_JOB_CAP + ' job; job sẽ chờ đến sau 00:00 (giờ VN).\n' +
+          'Bạn sẽ nhận thông báo ✅/❌ khi xong.');
+    } else {
+      var note = cand.altUrl
+          ? '\n🔁 Nếu bản gốc quá 1.9GB, sẽ tự dùng bản chất lượng thấp hơn.'
+          : '';
+      sendTelegramMessage(chatId,
+          "✅ Đã tạo job " + jobId + "\n" +
+          "🎬 Video đang được tải và upload lên kênh (vài phút tuỳ dung lượng)." + note + "\n" +
+          "Bạn sẽ nhận thông báo ✅/❌ khi xong.");
+    }
 
   } catch (error) {
     // Lỗi sớm (trước whitelist) → không bắn gì ra ngoài.
@@ -243,7 +250,7 @@ function getVideoCandidates(xUrl) {
 // Pipeline: tạo job vào Sheet queue + repository_dispatch (bản sao
 // gas/telegram-pipeline.gs — hợp đồng cột PHẢI khớp worker/sheet_queue.py)
 // ----------------------------------------------------------------------------
-function pipelineCreateJobAndDispatch(mp4Url, mp4AltUrl, chatId, statusId) {
+function pipelineCreateJob(mp4Url, mp4AltUrl, chatId, statusId, status) {
   var props = PropertiesService.getScriptProperties();
   var sheet = SpreadsheetApp.openById(props.getProperty('SHEET_ID'))
       .getSheetByName('Jobs');
@@ -253,14 +260,20 @@ function pipelineCreateJobAndDispatch(mp4Url, mp4AltUrl, chatId, statusId) {
   var now = Math.floor(Date.now() / 1000);
   var jobId = 'JOB-' + Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss')
       + '-' + Math.random().toString(36).slice(2, 8);
+  var initialStatus = status || 'PENDING';
   // job_id, status, url, chat_id, created_at, updated_at, worker, msg_id,
   // error, retry_count, checkpoint, media_key, url_alt
   sheet.appendRow([
-    jobId, 'PENDING', mp4Url, String(chatId), String(now), '',
+    jobId, initialStatus, mp4Url, String(chatId), String(now), '',
     '', '', '', '0', '0',
     statusId ? String(statusId) : '',
     mp4AltUrl ? String(mp4AltUrl) : ''
   ]);
+  return jobId;
+}
+
+function pipelineCreateJobAndDispatch(mp4Url, mp4AltUrl, chatId, statusId) {
+  var jobId = pipelineCreateJob(mp4Url, mp4AltUrl, chatId, statusId, 'PENDING');
   dispatchToGitHub(jobId);
   return jobId;
 }
