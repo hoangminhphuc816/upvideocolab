@@ -1,3 +1,4 @@
+// LEGACY — không deploy. Bản active là gas/bot-pipeline.gs (self-contained).
 // gas/telegram-pipeline.gs — copy toàn bộ vào dự án Apps Script hiện tại
 // (cùng project với doPost đang chạy).
 // Script Properties bắt buộc: SHEET_ID, WORKER_REPO (dạng "owner/repo"), GITHUB_PAT.

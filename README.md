@@ -11,11 +11,12 @@ GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab
 
     Bạn ──/dl <link X>──▶ Bot Telegram ──▶ GAS doPost (webhook)
                                             │ resolve URL (logic sẵn có)
-                                            │ INSERT job PENDING (Sheet)
+                                            │ INSERT job PENDING/WAITING (Sheet)
                                             │ POST repository_dispatch (PAT)
                                             ▼
                               GitHub Actions controller (public repo, $0)
                                             │ peek queue (worker trên VM tự claim verify-after-write)
+                                            │ release WAITING sau 00:00 VN
                                             │ cấp Colab VM qua colab run bootstrap
                                             ▼
                                    Colab VM worker (ephemeral)
@@ -25,7 +26,7 @@ GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab
                                             │ Sheet: DONE + msg_id
                                             ▼
                               Controller notify → Bot thông báo ✅/❌
-    Cron 2h/lần (Actions sweep): job treo → RETRY ×3 → FAILED + ❌
+    Cron 2h/lần (Actions sweep): job treo → RETRY ×3 → FAILED + ❌; cũng flip WAITING → PENDING.
     Chunk checkpoint resume: session chết → part không còn → reset `dl:0` → tải lại từ đầu.
 
 ## Thành phần
@@ -39,7 +40,8 @@ GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab
 | `worker/notifier.py` | Bot API sendMessage kết quả |
 | `controller/colab_dispatch.py` | Controller: peek queue → `colab run` bootstrap → exit map |
 | `.github/workflows/worker.yml` | Controller workflow: repository_dispatch + cron sweep + workflow_dispatch |
-| `gas/telegram-pipeline.gs` | GAS webhook: resolve URL, append PENDING, dispatch |
+| `gas/bot-pipeline.gs` | GAS webhook (active): resolve URL, append PENDING/WAITING, dispatch |
+| `gas/telegram-pipeline.gs` | Bản sao legacy — KHÔNG deploy cùng `bot-pipeline.gs` (trùng tên hàm) |
 | `tools/make_session.py` | Tạo StringSession local 1 lần |
 
 ## Deploy

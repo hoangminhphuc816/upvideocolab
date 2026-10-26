@@ -108,6 +108,12 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
    > tiêu đề `media_key` (cột L) và `url_alt` (cột M) cho dễ đọc — logic dùng
    > vị trí cột, không đọc tên.
 
+> **WAITING (vượt cap 10 job/ngày):** GAS vẫn ghi job vào `Jobs` với
+> `status=WAITING` (có `job_id`, `url`, `url_alt`, `media_key`) nhưng KHÔNG
+> dispatch. Lần dispatch/sweep đầu tiên sau 00:00 VN sẽ chuyển các dòng
+> `WAITING` có `created_at` trước 00:00 hôm nay sang `PENDING`. Giới hạn
+> 4 upload/ngày vẫn áp dụng, nên job có thể chờ thêm vài ngày.
+
 ## 5. GCP service account (worker đọc/ghi Sheet)
 
 1. console.cloud.google.com → tạo project mới (miễn phí).
@@ -331,11 +337,22 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
      có fallback URL cho ca này). Cách chữa: điền cột L của row cũ = status
      id của video đó — gửi lại link không giúp gì vì cột L vẫn trống.
 3. **Kiểm tra cap 10 job/ngày**: thêm tay 10 row có `created_at` = hôm nay →
-   gửi 1 link mới → kỳ vọng nhận “⛔ Hôm nay đã đủ 10 job” và Sheet
-   không thêm row mới.
+   gửi 1 link mới → kỳ vọng nhận “⏳ Đã lưu job … vào hàng đợi”, Sheet có
+   thêm 1 row `status=WAITING` (đủ 13 cột), và **không** có GitHub run mới.
+   Chạy `mode=sweep` sau khi sửa `created_at` của row đó thành hôm qua →
+   row chuyển `PENDING`.
 4. **Dọn dẹp**: xoá các row test sau khi kiểm tra.
 5. **Ghi lại kết quả**: lưu snapshot kết quả kiểm tra vào phiên làm việc
    hoặc ghi chú nội bộ; không ghi công khai vì bảo mật.
+
+- Bot báo “Đã lưu job … vào hàng đợi” nhưng không thấy chạy:
+  1. Kiểm tra row có `status=WAITING` và `created_at` là hôm qua/chưa.
+  2. Chạy workflow `mode=sweep` hoặc gửi 1 tin nhắn mới để controller
+     gọi `release_waiting()`.
+  3. Xem log controller có `::notice::Đã giải phóng … job WAITING`.
+  4. Nếu đã đủ 4 `DONE` hôm nay, job đã thành `PENDING` nhưng phải chờ mai.
+- Nếu sweep ngừng: `WAITING` không tự chuyển `PENDING`; sửa cron-job.org
+  trước khi chờ job chạy.
 
 ## 10c. Chính sách anti-abuse v3
 
