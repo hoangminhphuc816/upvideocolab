@@ -1,4 +1,6 @@
+from datetime import datetime
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import json
 import types
@@ -6,7 +8,13 @@ import pytest
 
 from worker.config import Config
 from worker.sheet_queue import Job
-from controller.colab_dispatch import _write_bootstrap, _materialize_token, dispatch_to_colab, _classify_run
+from controller.colab_dispatch import (
+    _write_bootstrap,
+    _materialize_token,
+    _classify_run,
+    day_start_epoch,
+    dispatch_to_colab,
+)
 
 
 def make_cfg():
@@ -28,6 +36,15 @@ WORKER_ENV = {
     "SHEET_ID": "S",
     "BOT_TOKEN": "t",
 }
+
+
+def test_day_start_epoch_dung_nua_dem_vn():
+    tz = ZoneInfo("Asia/Ho_Chi_Minh")
+    midnight = int(datetime(2026, 10, 26, 0, 0, tzinfo=tz).timestamp())
+    assert day_start_epoch(midnight) == midnight
+    assert day_start_epoch(midnight + 1) == midnight       # 00:00:01
+    assert day_start_epoch(midnight + 86399) == midnight   # 23:59:59
+    assert day_start_epoch(midnight - 1) == midnight - 86400  # 23:59:59 hôm trước
 
 
 def test_write_bootstrap_includes_env_worker_id_and_repo_excludes_token(monkeypatch):
@@ -256,3 +273,47 @@ def test_dispatch_goi_release_waiting_truoc_next_job(tmp_path, monkeypatch):
     q.release_waiting.assert_called_once_with(123456)
     q.next_job.assert_called_once()
     run.assert_not_called()
+
+
+def test_dispatch_release_waiting_loi_van_tiep_tuc(tmp_path, monkeypatch, capsys):
+    """Lỗi release (Sheet 429/5xx) không được giết cả lượt dispatch."""
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    q = MagicMock()
+    q.release_waiting.side_effect = RuntimeError("sheet down")
+    q.next_job.return_value = None
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run") as run, \
+         patch("controller.colab_dispatch.TOKEN_PATH",
+               tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.day_start_epoch", return_value=123456):
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV,
+                              colab_token_json="{}")
+    assert rc == 0
+    q.next_job.assert_called_once()
+    run.assert_not_called()
+    out = capsys.readouterr().out
+    assert "::warning::" in out
+    assert "release_waiting" in out
+
+
+def test_dispatch_release_roi_van_dispatch(tmp_path, monkeypatch):
+    """Release có row → vẫn đi tiếp vào nhánh dispatch bình thường."""
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    job = Job("JOB-1", "PENDING", "u", 42, 100, None, "", None, "", 0, "0", 2)
+    q = MagicMock()
+    q.release_waiting.return_value = 1
+    q.next_job.return_value = job
+    q.count_done_since.return_value = 0
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run") as run, \
+         patch("controller.colab_dispatch.TOKEN_PATH",
+               tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"), \
+         patch("controller.colab_dispatch.day_start_epoch", return_value=123456):
+        run.return_value.returncode = 0
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV,
+                              colab_token_json="{}")
+    assert rc == 0
+    assert [c[0] for c in q.method_calls[:2]] == ["release_waiting", "next_job"]
+    q.count_done_since.assert_called_once_with(123456)
+    run.assert_called_once()

@@ -7,6 +7,7 @@ Cột `worker` ghi worker_id của attempt hiện tại đang xử lý job; KHÔ
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from datetime import datetime, timezone
 import gspread
 
 from worker.config import Config
+
+log = logging.getLogger("worker")
 
 COLUMNS = ["job_id", "status", "url", "chat_id", "created_at", "updated_at",
            "worker", "msg_id", "error", "retry_count", "checkpoint",
@@ -119,6 +122,7 @@ class SheetQueue:
         """
         released = 0
         now = self._now_ts()
+        data = []
         for i, row in enumerate(self.sheet.get_all_values(), start=1):
             if i < 2:
                 continue
@@ -126,11 +130,28 @@ class SheetQueue:
                 continue
             created = self._to_int(row[self._col["created_at"] - 1])
             # created_at rỗng/0: không biết tuổi → giữ nguyên, không release.
-            if created <= 0 or created >= before_ts:
+            if created <= 0:
+                log.warning(
+                    "WAITING %s: created_at không hợp lệ (%r) — cần sửa tay",
+                    row[self._col["job_id"] - 1],
+                    row[self._col["created_at"] - 1],
+                )
                 continue
-            self.sheet.update_cell(i, self._col["status"], "PENDING")
-            self.sheet.update_cell(i, self._col["updated_at"], str(now))
+            if created >= before_ts:
+                continue
+            # Gom vào 1 values.batchUpdate: 2N update_cell riêng sẽ chạm
+            # quota write/phút của Sheets khi backlog lớn.
+            data.append({
+                "range": gspread.utils.rowcol_to_a1(i, self._col["status"]),
+                "values": [["PENDING"]],
+            })
+            data.append({
+                "range": gspread.utils.rowcol_to_a1(i, self._col["updated_at"]),
+                "values": [[str(now)]],
+            })
             released += 1
+        if data:
+            self.sheet.batch_update(data)
         return released
 
     def get_job(self, job_id: str) -> Job | None:

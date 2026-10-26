@@ -137,8 +137,38 @@ function doPost(e) {
       return _ok200('ok');
     }
 
-    // ---- Chống trùng: job đang chờ/đang chạy HOẶC DONE trong 24h ----
-    var dupJob = isQueuedOrRecent([cand.url, cand.altUrl], statusId);
+    // ---- Chống trùng + cap + append: serialize để 2 webhook concurrent
+    // không cùng đọc 9 job rồi cùng tạo, và không cùng lọt dedupe. ----
+    var lock = LockService.getScriptLock();
+    var gotLock = false;
+    try {
+      gotLock = lock.tryLock(10000);
+    } catch (lockErr) {
+      console.warn('LockService lỗi: ' + lockErr);
+    }
+    if (!gotLock) {
+      sendTelegramMessage(chatId,
+          '⏳ Hệ thống đang xử lý tin nhắn khác. Bạn thử lại sau ít phút.');
+      return _ok200('busy');
+    }
+
+    var dupJob = null;
+    var atCap = false;
+    var jobId = '';
+    try {
+      dupJob = isQueuedOrRecent([cand.url, cand.altUrl], statusId);
+      if (!dupJob) {
+        atCap = jobsCreatedToday() >= DAILY_JOB_CAP;
+        jobId = atCap
+            ? pipelineCreateJob(cand.url, cand.altUrl, chatId, statusId, 'WAITING')
+            : pipelineCreateJob(cand.url, cand.altUrl, chatId, statusId, 'PENDING');
+      }
+    } finally {
+      try { lock.releaseLock(); } catch (releaseErr) {
+        console.warn('releaseLock lỗi: ' + releaseErr);
+      }
+    }
+
     if (dupJob) {
       console.log('PIPELINE-DUP ' + cand.url + ' → job ' + dupJob);
       var dupMsg = 'ℹ️ Video này đã có trong hàng đợi hoặc đã upload (job ' + dupJob + '). Không tạo lại.';
@@ -149,20 +179,19 @@ function doPost(e) {
       return _ok200('ok');
     }
 
-    // ---- Cap 10 job/ngày (giờ VN) ----
-    // Vượt cap: vẫn ghi job vào Sheet với status WAITING, KHÔNG dispatch.
-    // Lần dispatch/sweep đầu tiên sau 00:00 VN sẽ chuyển WAITING → PENDING.
-    var atCap = jobsCreatedToday() >= DAILY_JOB_CAP;
-    var jobId = atCap
-        ? pipelineCreateJob(cand.url, cand.altUrl, chatId, statusId, 'WAITING')
-        : pipelineCreateJobAndDispatch(cand.url, cand.altUrl, chatId, statusId);
+    // Dispatch ngoài lock: repository_dispatch có thể chậm 15s, không giữ
+    // lock của các message khác.
+    if (!atCap) {
+      dispatchToGitHub(jobId);
+    }
     console.log('PIPELINE-JOB ' + jobId + ' chat=' + chatId
         + (atCap ? ' WAITING' : ' PENDING'));
 
     if (atCap) {
       sendTelegramMessage(chatId,
           '⏳ Đã lưu job ' + jobId + ' vào hàng đợi.\n' +
-          'Hôm nay đã đủ ' + DAILY_JOB_CAP + ' job; job sẽ chờ đến sau 00:00 (giờ VN).\n' +
+          'Hôm nay đã đủ ' + DAILY_JOB_CAP + ' job; sau 00:00 VN job sẽ vào hàng đợi xử lý.\n' +
+          'Tuỳ số job đang chờ, có thể mất thêm vài ngày.\n' +
           'Bạn sẽ nhận thông báo ✅/❌ khi xong.');
     } else {
       var note = cand.altUrl
@@ -269,12 +298,6 @@ function pipelineCreateJob(mp4Url, mp4AltUrl, chatId, statusId, status) {
     statusId ? String(statusId) : '',
     mp4AltUrl ? String(mp4AltUrl) : ''
   ]);
-  return jobId;
-}
-
-function pipelineCreateJobAndDispatch(mp4Url, mp4AltUrl, chatId, statusId) {
-  var jobId = pipelineCreateJob(mp4Url, mp4AltUrl, chatId, statusId, 'PENDING');
-  dispatchToGitHub(jobId);
   return jobId;
 }
 

@@ -113,6 +113,10 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
 > dispatch. Lần dispatch/sweep đầu tiên sau 00:00 VN sẽ chuyển các dòng
 > `WAITING` có `created_at` trước 00:00 hôm nay sang `PENDING`. Giới hạn
 > 4 upload/ngày vẫn áp dụng, nên job có thể chờ thêm vài ngày.
+>
+> **Thứ tự deploy:** push/deploy `worker/` + `controller/` trước, rồi mới
+> deploy GAS. GAS mới + controller cũ sẽ tạo `WAITING` nhưng không có ai
+> release — job kẹt im lặng.
 
 ## 5. GCP service account (worker đọc/ghi Sheet)
 

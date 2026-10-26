@@ -3,7 +3,10 @@
 SheetQueue.__init__ dựng gspread client thật, nên các test dựng object qua
 __new__ và gán thủ công các attribute cần thiết (cfg, sheet, _col, _job_cache).
 """
+import logging
 from unittest.mock import MagicMock
+
+from gspread.utils import a1_to_rowcol
 
 from worker.config import Config
 from worker.sheet_queue import SheetQueue, Job, COLUMNS, STATUSES
@@ -29,12 +32,19 @@ class FakeSheet:
     def __init__(self, rows):
         self.rows = [list(r) for r in rows]
         self.worksheet = MagicMock()
+        self.batch_calls = []
 
     def get_all_values(self):
         return [list(r) for r in self.rows]
 
     def update_cell(self, r, c, value):
         self.rows[r - 1][c - 1] = str(value)
+
+    def batch_update(self, data):
+        self.batch_calls.append(data)
+        for item in data:
+            row, col = a1_to_rowcol(item["range"])
+            self.update_cell(row, col, item["values"][0][0])
 
     def append_row(self, row):
         self.rows.append([str(v) for v in row])
@@ -315,16 +325,36 @@ def test_sweep_khong_dung_vao_waiting():
     assert q.sheet.rows[1][9] == "0"
 
 
-def test_release_waiting_chi_giai_phong_cu():
+def test_release_waiting_chi_giai_phong_cu(caplog):
     rows = [HDR,
             ["JOB-OLD", "WAITING", "u1", "42", "100", "", "", "", "", "0", "0"],
             ["JOB-TODAY", "WAITING", "u2", "42", "200", "", "", "", "", "0", "0"],
             ["JOB-EMPTY", "WAITING", "u3", "42", "", "", "", "", "", "0", "0"],
             ["JOB-PENDING", "PENDING", "u4", "42", "50", "", "", "", "", "0", "0"]]
     q = q_with(rows, now_ts=500)
-    assert q.release_waiting(150) == 1
+    with caplog.at_level(logging.WARNING, logger="worker"):
+        assert q.release_waiting(150) == 1
     assert q.sheet.rows[1][1] == "PENDING"
     assert q.sheet.rows[1][5] == "500"       # updated_at
     assert q.sheet.rows[2][1] == "WAITING"   # tạo hôm nay
     assert q.sheet.rows[3][1] == "WAITING"   # created_at rỗng → không release
     assert q.sheet.rows[4][1] == "PENDING"   # row khác không bị đụng
+    assert "JOB-EMPTY" in caplog.text
+    assert "created_at không hợp lệ" in caplog.text
+
+
+def test_release_waiting_gui_mot_batch_request():
+    """Nhiều row WAITING phải gom vào 1 batch_update, không 2 request/row."""
+    rows = [HDR,
+            ["JOB-OLD1", "WAITING", "u1", "42", "100", "", "", "", "", "0", "0"],
+            ["JOB-TODAY", "WAITING", "u2", "42", "200", "", "", "", "", "0", "0"],
+            ["JOB-OLD2", "WAITING", "u3", "42", "50", "", "", "", "", "0", "0"]]
+    q = q_with(rows, now_ts=500)
+    assert q.release_waiting(150) == 2
+    assert len(q.sheet.batch_calls) == 1
+    assert len(q.sheet.batch_calls[0]) == 4       # 2 cell/row × 2 row
+    assert q.sheet.rows[1][1] == "PENDING"
+    assert q.sheet.rows[1][5] == "500"
+    assert q.sheet.rows[2][1] == "WAITING"
+    assert q.sheet.rows[3][1] == "PENDING"
+    assert q.sheet.rows[3][5] == "500"

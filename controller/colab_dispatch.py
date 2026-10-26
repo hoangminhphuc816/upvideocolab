@@ -149,7 +149,11 @@ sys.exit(worker_main())
 def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json: str) -> int:
     _materialize_token(colab_token_json)
     queue = SheetQueue(cfg)
-    released = queue.release_waiting(day_start_epoch())
+    try:
+        released = queue.release_waiting(day_start_epoch())
+    except Exception as e:  # release là best-effort; không được giết dispatch
+        _annotate("warning", f"release_waiting lỗi — bỏ qua: {e}")
+        released = 0
     if released:
         print(f"::notice::Đã giải phóng {released} job WAITING sang PENDING "
               f"(sau 00:00 VN).")

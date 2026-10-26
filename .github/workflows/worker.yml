@@ -79,4 +79,6 @@ jobs:
       - name: Sweep job treo (trên runner — chỉ Sheet + notify)
         run: python -m worker.main --sweep
       - name: Xử lý job PENDING/RETRY còn lại (watchdog → Colab VM)
+        # Luôn chạy: sweep lỗi không được chặn bước release WAITING.
+        if: always()
         run: python -m controller.colab_dispatch
