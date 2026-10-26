@@ -1,9 +1,7 @@
-// LEGACY — không deploy. Bản active là gas/bot-pipeline.gs (self-contained).
-// Các dòng hướng dẫn bên dưới chỉ áp dụng cho bot cũ; bản active là gas/bot-pipeline.gs.
-// gas/telegram-pipeline.gs — copy toàn bộ vào dự án Apps Script hiện tại
-// (cùng project với doPost đang chạy).
-// Script Properties bắt buộc: SHEET_ID, WORKER_REPO (dạng "owner/repo"), GITHUB_PAT.
-// Sau khi thêm file: deploy lại Web App version mới.
+// LEGACY — KHÔNG deploy. Bản active là gas/bot-pipeline.gs (self-contained).
+// File này chỉ là bản sao lịch sử của helper cũ. Không paste vào project
+// đang dùng bot-pipeline.gs vì trùng tên hàm.
+// Script Properties bắt buộc (nếu dùng bot cũ): SHEET_ID, WORKER_REPO, GITHUB_PAT.
 
 /**
  * Gọi từ doPost() sau khi đã resolve ra link MP4.

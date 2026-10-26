@@ -325,9 +325,10 @@ python -m controller.colab_dispatch
   1. Kiểm tra row có `status=WAITING` và `created_at` là hôm qua/chưa.
   2. Tin nhắn mới chỉ giúp nếu hôm nay chưa đủ 10 job (lúc đó controller
      nhận PENDING mới → release + dispatch). Nếu đã đủ 10 job, tin nhắn
-     mới sẽ tạo thêm WAITING thay vì giải phóng; khi đã thấy reply WAITING,
-     phải chờ sau 00:00 VN hoặc chạy `mode=sweep` để flip.
-  3. Chạy `mode=sweep` hoặc đợi đến sau 00:00 VN rồi gửi tin nhắn mới.
+     mới sẽ tạo thêm WAITING thay vì giải phóng.
+  3. Row WAITING tạo hôm nay chỉ được release sau 00:00 VN ngày mai.
+     `mode=sweep` chỉ flip row có `created_at` trước 00:00 hôm nay; chạy
+     sweep trong ngày không giải phóng được row vừa tạo.
   4. Xem log controller có `::notice::Đã giải phóng … job WAITING`.
   5. Nếu đã đủ 4 `DONE` hôm nay, job đã thành `PENDING` nhưng phải chờ mai.
 - Nếu sweep ngừng: `WAITING` không tự chuyển `PENDING`; sửa cron-job.org
@@ -358,7 +359,7 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
    Row có thể chỉ thoáng qua `PENDING` nếu `done_today < 4`; cùng lúc sweep
    sẽ claim/upload nên kỳ vọng thấy `CLAIMED`/`DOWNLOADING`/`DONE`. Nếu đã
    đủ 4 `DONE` hôm nay, row giữ `PENDING` đến mai. Lưu ý: test có thể
-   khởi động upload thật — dùng link disposable hoặc sẵn sòng xem kết quả.
+   khởi động upload thật — dùng link disposable hoặc sẵn sàng xem kết quả.
 4. **Dọn dẹp**: xoá các row test sau khi kiểm tra.
 5. **Ghi lại kết quả**: lưu snapshot kết quả kiểm tra vào phiên làm việc
    hoặc ghi chú nội bộ; không ghi công khai vì bảo mật.
