@@ -254,7 +254,6 @@ def test_dispatch_goi_release_waiting_truoc_next_job(tmp_path, monkeypatch):
                               colab_token_json="{}")
     assert rc == 0
     assert [c[0] for c in q.method_calls] == ["release_waiting", "next_job"]
-    assert q.release_waiting.call_count == 1
-    assert q.release_waiting.call_args == ANY
+    q.release_waiting.assert_called_once_with(ANY)
     q.next_job.assert_called_once()
     run.assert_not_called()
