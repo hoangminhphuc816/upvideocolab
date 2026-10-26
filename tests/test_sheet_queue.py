@@ -6,7 +6,7 @@ __new__ và gán thủ công các attribute cần thiết (cfg, sheet, _col, _jo
 from unittest.mock import MagicMock
 
 from worker.config import Config
-from worker.sheet_queue import SheetQueue, Job, COLUMNS
+from worker.sheet_queue import SheetQueue, Job, COLUMNS, STATUSES
 
 # COLUMNS (đúng thứ tự): job_id, status, url, chat_id, created_at, updated_at,
 #                        worker, msg_id, error, retry_count, checkpoint,
@@ -286,3 +286,45 @@ def test_checkpoint_invalid_returns_zero():
     assert checkpoint_dl_bytes(job) == 0
     job2 = Job("J", "PENDING", "u", 42, 1, None, "", None, "", 0, "0", 2)
     assert checkpoint_dl_bytes(job2) == 0
+
+
+def test_statuses_bao_gom_waiting():
+    assert "WAITING" in STATUSES
+
+
+def test_next_job_bo_qua_waiting():
+    rows = [HDR,
+            ["JOB-W", "WAITING", "u1", "42", "100", "", "", "", "", "0", "0"],
+            ["JOB-P", "PENDING", "u2", "42", "200", "", "", "", "", "0", "0"]]
+    q = q_with(rows)
+    job = q.next_job()
+    assert job is not None and job.job_id == "JOB-P"
+
+
+def test_next_job_none_khi_chi_co_waiting():
+    rows = [HDR, ["JOB-W", "WAITING", "u1", "42", "100", "", "", "", "", "0", "0"]]
+    q = q_with(rows)
+    assert q.next_job() is None
+
+
+def test_sweep_khong_dung_vao_waiting():
+    rows = [HDR, ["JOB-W", "WAITING", "u1", "42", "100", "", "", "", "", "0", "0"]]
+    q = q_with(rows, now_ts=100000)
+    assert q.sweep_stale(older_than_min=15) == []
+    assert q.sheet.rows[1][1] == "WAITING"
+    assert q.sheet.rows[1][9] == "0"
+
+
+def test_release_waiting_chi_giai_phong_cu():
+    rows = [HDR,
+            ["JOB-OLD", "WAITING", "u1", "42", "100", "", "", "", "", "0", "0"],
+            ["JOB-TODAY", "WAITING", "u2", "42", "200", "", "", "", "", "0", "0"],
+            ["JOB-EMPTY", "WAITING", "u3", "42", "", "", "", "", "", "0", "0"],
+            ["JOB-PENDING", "PENDING", "u4", "42", "50", "", "", "", "", "0", "0"]]
+    q = q_with(rows, now_ts=500)
+    assert q.release_waiting(150) == 1
+    assert q.sheet.rows[1][1] == "PENDING"
+    assert q.sheet.rows[1][5] == "500"       # updated_at
+    assert q.sheet.rows[2][1] == "WAITING"   # tạo hôm nay
+    assert q.sheet.rows[3][1] == "WAITING"   # created_at rỗng → không release
+    assert q.sheet.rows[4][1] == "PENDING"   # row khác không bị đụng

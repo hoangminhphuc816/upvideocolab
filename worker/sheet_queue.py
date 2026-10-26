@@ -19,7 +19,8 @@ from worker.config import Config
 COLUMNS = ["job_id", "status", "url", "chat_id", "created_at", "updated_at",
            "worker", "msg_id", "error", "retry_count", "checkpoint",
            "media_key", "url_alt"]
-STATUSES = ["PENDING", "CLAIMED", "DOWNLOADING", "UPLOADING", "DONE", "FAILED", "RETRY"]
+STATUSES = ["PENDING", "WAITING", "CLAIMED", "DOWNLOADING", "UPLOADING",
+            "DONE", "FAILED", "RETRY"]
 SWEEPABLE = ("CLAIMED", "DOWNLOADING", "UPLOADING")  # PENDING = chưa từng thử ⇒ không phải stale
 
 
@@ -105,6 +106,32 @@ class SheetQueue:
             return None
         _, _, i, row = min(candidates, key=lambda c: (c[0], c[1]))
         return self._parse_row(i, row)
+
+    def release_waiting(self, before_ts: int) -> int:
+        """Chuyển các job WAITING tạo trước `before_ts` sang PENDING.
+
+        `before_ts` là 00:00 hôm nay theo giờ VN (epoch giây). Nhờ vậy job
+        vượt cap hôm qua được thả vào hàng đợi ở lần dispatch/sweep đầu tiên
+        sau 00:00; job WAITING tạo trong hôm nay vẫn chờ.
+
+        Dùng update_cell trực tiếp theo row index (không gọi set_status) để
+        tránh quét lại toàn Sheet cho từng row.
+        """
+        released = 0
+        now = self._now_ts()
+        for i, row in enumerate(self.sheet.get_all_values(), start=1):
+            if i < 2:
+                continue
+            if row[self._col["status"] - 1] != "WAITING":
+                continue
+            created = self._to_int(row[self._col["created_at"] - 1])
+            # created_at rỗng/0: không biết tuổi → giữ nguyên, không release.
+            if created <= 0 or created >= before_ts:
+                continue
+            self.sheet.update_cell(i, self._col["status"], "PENDING")
+            self.sheet.update_cell(i, self._col["updated_at"], str(now))
+            released += 1
+        return released
 
     def get_job(self, job_id: str) -> Job | None:
         """Đọc lại dòng job (giá trị tươi) — dùng cho controller phân loại sau
