@@ -317,3 +317,9 @@ def test_dispatch_release_roi_van_dispatch(tmp_path, monkeypatch):
     assert [c[0] for c in q.method_calls[:2]] == ["release_waiting", "next_job"]
     q.count_done_since.assert_called_once_with(123456)
     run.assert_called_once()
+
+
+def test_write_bootstrap_pins_cryptg(monkeypatch):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
+    assert "cryptg==0.5.2" in src

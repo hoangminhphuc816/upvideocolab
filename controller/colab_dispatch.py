@@ -136,7 +136,7 @@ def run(cmd):
 
 
 run([sys.executable, "-m", "pip", "install", "-q",
-     "gspread>=6.0,<7", "telethon==1.45.0", "cryptg", "requests"])
+     "gspread>=6.0,<7", "telethon==1.45.0", "cryptg==0.5.2", "requests"])
 run(["git", "clone", "--depth", "1",
      "https://github.com/{repo}.git", "/content/app"])
 sys.path.insert(0, "/content/app")

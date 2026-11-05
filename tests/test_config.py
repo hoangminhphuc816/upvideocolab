@@ -1,5 +1,7 @@
 import pytest
 
+from pathlib import Path
+
 from worker.config import load_config, Config, SWEEP_REQUIRED
 
 
@@ -65,3 +67,9 @@ def test_load_config_subset_for_sweep(monkeypatch):
     assert cfg.sheet_id == "abc123sheetid"
     assert cfg.api_id == 0
     assert cfg.telethon_session == ""
+
+
+def test_requirements_cryptg_pin_matches_bootstrap():
+    req = Path("requirements.txt").read_text()
+    assert "cryptg==0.5.2" in req
+    assert 'python_version < "3.15"' in req
