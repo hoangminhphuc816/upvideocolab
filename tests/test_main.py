@@ -1,3 +1,4 @@
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, ANY, call, patch
 
@@ -537,3 +538,13 @@ async def test_run_once_eof_416_after_full_chunk_assembles(tmp_path):
         rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
     assert rc == 0
     q.set_checkpoint.assert_called_with("JOB-1", "dl:full")
+
+
+@pytest.mark.asyncio
+async def test_run_once_blocking_reraises_thread_exception_not_index_error():
+    q = MagicMock()
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.run_once", side_effect=RuntimeError("gspread boom")):
+        from worker.main import _run_once_blocking
+        with pytest.raises(RuntimeError, match="gspread boom"):
+            _run_once_blocking(make_cfg())

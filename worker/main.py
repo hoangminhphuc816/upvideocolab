@@ -206,9 +206,19 @@ def _run_once_blocking(cfg: Config) -> int:
         return asyncio.run(run_once(cfg))
 
     result: list[int] = []
-    t = threading.Thread(target=lambda: result.append(asyncio.run(run_once(cfg))))
+    error: list[BaseException] = []
+
+    def _target() -> None:
+        try:
+            result.append(asyncio.run(run_once(cfg)))
+        except BaseException as e:  # noqa: BLE001 — re-raised on main thread below
+            error.append(e)
+
+    t = threading.Thread(target=_target)
     t.start()
     t.join()
+    if error:
+        raise error[0]
     return result[0]
 
 
