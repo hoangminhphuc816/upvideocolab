@@ -322,7 +322,7 @@ python -m controller.colab_dispatch
 | Job dùng nhầm bản thấp dù bản gốc <1.9GB | Kiểm tra cột `url`/`url_alt`; xem log `PIPELINE-RESOLVE`; sửa `getVideoCandidates` nếu getxbot đổi format. |
 | curl probe trả `None` (không đo được) | Worker vẫn tải bản gốc; guard giữa luồng chặn. Kiểm tra `curl --version` trên Colab, URL hết hạn (403/404), hoặc CDN bỏ Range. |
 | Telegram vẫn từ chối file <1.9GB | Hạ `TELEGRAM_MAX` trong `worker/downloader.py` (một dòng decimal bytes); chạy lại test. |
-| Bootstrap fail `Building wheel for cryptg` | pip có wheel? Kiểm tra `cryptg==0.5.2` đã pin trong `controller/colab_dispatch.py` + `requirements.txt`; xem log `[bootstrap] python` để biết Python của VM; nếu VM lên Python mới chưa có wheel → bump pin lên bản tương ứng hoặc bỏ dòng cryptg (Telethon tự fallback sang pyaes) |
+| Bootstrap fail `Building wheel for cryptg` | pip có wheel? Kiểm tra `cryptg==0.5.2` đã pin trong `controller/colab_dispatch.py` + `requirements.txt`; xem log `[bootstrap] python` để biết Python của VM; nếu VM lên Python mới chưa có wheel → bump pin lên bản tương ứng hoặc bỏ dòng cryptg. Thứ tự fallback của Telethon là **cryptg → libssl (OpenSSL) → pyaes**, nên bỏ cryptg KHÔNG đồng nghĩa xuống pyaes: trên Colab/Ubuntu có OpenSSL thì vẫn nhanh (libssl), chỉ khi OpenSSL cũng thiếu mới rơi xuống pyaes pure-Python (chậm nhiều) |
 
 ### WAITING không chạy
 
