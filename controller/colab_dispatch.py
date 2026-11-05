@@ -135,6 +135,8 @@ def run(cmd):
         sys.exit(1)
 
 
+print("[bootstrap] python", sys.version, flush=True)
+
 run([sys.executable, "-m", "pip", "install", "-q",
      "gspread>=6.0,<7", "telethon==1.45.0", "cryptg==0.5.2", "requests"])
 run(["git", "clone", "--depth", "1",

@@ -323,3 +323,9 @@ def test_write_bootstrap_pins_cryptg(monkeypatch):
     monkeypatch.setenv("WORKER_REPO", "owner/repo")
     src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
     assert "cryptg==0.5.2" in src
+
+
+def test_write_bootstrap_prints_python_version(monkeypatch):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
+    assert "sys.version" in src
