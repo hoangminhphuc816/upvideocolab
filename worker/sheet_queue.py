@@ -203,6 +203,14 @@ class SheetQueue:
         if error:
             self.sheet.update_cell(row, self._col["error"], str(error)[:500])
 
+    def _set_status_at_row(self, row: int, status: str, error: str = "") -> None:
+        if status not in STATUSES:
+            raise ValueError(f"status không hợp lệ: {status}")
+        self.sheet.update_cell(row, self._col["status"], status)
+        self.sheet.update_cell(row, self._col["updated_at"], str(self._now_ts()))
+        if error:
+            self.sheet.update_cell(row, self._col["error"], str(error)[:500])
+
     def touch(self, job_id: str) -> None:
         """Làm mới updated_at để sweep không coi job đang chạy là stale.
 
@@ -258,10 +266,10 @@ class SheetQueue:
                 continue  # còn mới
             retries = self._to_int(row[self._col["retry_count"] - 1])
             if retries >= max_retries:
-                self.set_status(job_id, "FAILED", error="quá số lần retry")
+                self._set_status_at_row(i, "FAILED", error="quá số lần retry")
                 newly_failed.append(job_id)
             else:
-                self.set_status(job_id, "RETRY")
+                self._set_status_at_row(i, "RETRY")
                 self.sheet.update_cell(i, self._col["retry_count"], str(retries + 1))
         return newly_failed
 

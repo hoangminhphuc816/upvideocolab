@@ -343,6 +343,26 @@ def test_release_waiting_chi_giai_phong_cu(caplog):
     assert "created_at không hợp lệ" in caplog.text
 
 
+def test_sweep_stale_does_not_refetch_sheet_per_job():
+    rows = [HDR,
+            ["JOB-OLD", "CLAIMED", "u1", "42", "100", "115", "w", "", "", "0", "0"],
+            ["JOB-MAX", "CLAIMED", "u3", "42", "100", "115", "w", "", "", "3", "0"],
+            ["JOB-DL", "DOWNLOADING", "u4", "42", "100", "100", "w", "", "", "1", "0"]]
+    q = q_with(rows, now_ts=2000)
+    calls = {"n": 0}
+    orig = q.sheet.get_all_values
+    def counting():
+        calls["n"] += 1
+        return orig()
+    q.sheet.get_all_values = counting
+    failed = q.sweep_stale(older_than_min=15, max_retries=3)
+    assert calls["n"] <= 2
+    assert failed == ["JOB-MAX"]
+    assert q.sheet.rows[1][1] == "RETRY" and q.sheet.rows[1][9] == "1"
+    assert q.sheet.rows[2][1] == "FAILED"
+    assert q.sheet.rows[3][1] == "RETRY" and q.sheet.rows[3][9] == "2"
+
+
 def test_release_waiting_gui_mot_batch_request():
     """Nhiều row WAITING phải gom vào 1 batch_update, không 2 request/row."""
     rows = [HDR,
