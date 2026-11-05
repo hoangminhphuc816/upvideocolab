@@ -142,10 +142,13 @@ deps = ["gspread>=6.0,<7", "telethon==1.45.0",
 if sys.version_info >= (3, 15):
     # cryptg 0.5.2 ships wheels through cp314; on 3.15+ there is no wheel
     # yet, and a source build needs Rust on the VM (unavailable). Skip it and
-    # let Telethon fall back to pure-Python pyaes instead of failing bootstrap.
+    # let Telethon fall back via its normal chain cryptg -> libssl ->
+    # pyaes (Colab/Ubuntu with OpenSSL stays fast via libssl; pure-Python
+    # pyaes only if libssl is also missing).
     deps.remove("cryptg==0.5.2")
     print("[bootstrap] Python >= 3.15: cryptg khong có wheel — bỏ qua, "
-          "Telethon dùng pyaes fallback (chậm hơn nhưng không vỡ bootstrap)",
+          "Telethon dung fallback cryptg -> libssl -> pyaes "
+          "(Colab/Ubuntu co OpenSSL thi libssl, van nhanh)",
           flush=True)
 run([sys.executable, "-m", "pip", "install", "-q", *deps])
 run(["git", "clone", "--depth", "1",

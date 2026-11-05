@@ -355,4 +355,4 @@ def test_bootstrap_keeps_cryptg_below_3_15(monkeypatch):
 def test_write_bootstrap_prints_python_version(monkeypatch):
     monkeypatch.setenv("WORKER_REPO", "owner/repo")
     src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
-    assert "sys.version" in src
+    assert "[bootstrap] python" in src
