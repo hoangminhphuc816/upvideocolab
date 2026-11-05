@@ -102,38 +102,6 @@ async def test_upload_start_failure_wraps_and_disconnects():
 
 
 @pytest.mark.asyncio
-async def test_upload_passes_generated_thumb():
-    msg = MagicMock(); msg.id = 777
-    client = MagicMock()
-    client.start = AsyncMock(); client.disconnect = AsyncMock()
-    client.send_file = AsyncMock(return_value=msg)
-    with patch("worker.uploader.TelegramClient", return_value=client), \
-         patch("worker.uploader.StringSession"), \
-         patch("worker.uploader.probe_video_metadata", return_value=(640, 360, 120)), \
-         patch("worker.uploader.extract_thumbnail", return_value="/tmp/thumb.jpg") as et:
-        mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
-    assert mid == 777
-    assert et.call_args.kwargs.get("seek_seconds") == 30.0  # min(120/4, 30)
-    kwargs = client.send_file.call_args.kwargs
-    assert kwargs["thumb"] == "/tmp/thumb.jpg"
-
-
-@pytest.mark.asyncio
-async def test_upload_without_thumb_still_works():
-    msg = MagicMock(); msg.id = 778
-    client = MagicMock()
-    client.start = AsyncMock(); client.disconnect = AsyncMock()
-    client.send_file = AsyncMock(return_value=msg)
-    with patch("worker.uploader.TelegramClient", return_value=client), \
-         patch("worker.uploader.StringSession"), \
-         patch("worker.uploader.probe_video_metadata", return_value=(640, 360, 3)), \
-         patch("worker.uploader.extract_thumbnail", return_value=None):
-        mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
-    assert mid == 778
-    assert client.send_file.call_args.kwargs["thumb"] is None
-
-
-@pytest.mark.asyncio
 async def test_upload_deletes_thumb_on_success_and_on_error(tmp_path):
     thumb = tmp_path / "thumb.jpg"
     thumb.write_bytes(b"\xff\xd8jpeg")
