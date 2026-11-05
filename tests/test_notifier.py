@@ -49,3 +49,23 @@ def test_notify_bot_api_error_raises():
     with patch("worker.notifier.requests.post", return_value=bad):
         with pytest.raises(NotifyError, match="chat not found"):
             notify_done(make_cfg(), "JOB-1", 555)
+
+
+def test_notify_non_json_body_raises_notify_error():
+    import requests
+    bad = MagicMock()
+    bad.status_code = 200
+    bad.json = MagicMock(side_effect=requests.exceptions.JSONDecodeError("bad", "x", 0))
+    with patch("worker.notifier.requests.post", return_value=bad):
+        with pytest.raises(NotifyError, match="bot API"):
+            notify_done(make_cfg(), "JOB-1", 555)
+
+
+def test_notify_parses_body_only_once():
+    r = MagicMock()
+    r.status_code = 200
+    r.json = MagicMock(return_value={"ok": False, "description": "Bad Request"})
+    with patch("worker.notifier.requests.post", return_value=r):
+        with pytest.raises(NotifyError):
+            notify_done(make_cfg(), "JOB-1", 555)
+    assert r.json.call_count == 1

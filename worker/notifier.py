@@ -25,9 +25,13 @@ def _send(cfg: Config, text: str) -> None:
         )
     except requests.RequestException as e:
         raise NotifyError(f"không gửi được thông báo: {e}") from None
-    if resp.status_code != 200 or not resp.json().get("ok"):
+    try:
+        body = resp.json()
+    except (requests.RequestException, ValueError) as e:
+        raise NotifyError(f"bot API trả body không phải JSON: {e}") from None
+    if resp.status_code != 200 or not body.get("ok"):
         raise NotifyError(
-            f"bot API lỗi: {resp.json().get('description', resp.status_code)}"
+            f"bot API lỗi: {body.get('description', resp.status_code)}"
         )
 
 
