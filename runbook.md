@@ -306,6 +306,7 @@ python -m controller.colab_dispatch
 | Sheet `PERMISSION_DENIED` | SA chưa được Share Editor Sheet |
 | Video không stream được trong kênh | ffprobe chặn file không có video stream; codec lạ (vd HEVC/mkv) vẫn qua ffprobe nhưng kênh có thể không stream được |
 | `ffprobe`/`ffmpeg` thiếu trên VM | VM Colab có sẵn `ffprobe`; validate fail → kiểm tra source file có video stream không |
+| Upload xong nhưng video không có thumbnail (ô đen) | `ffmpeg` không có trên VM hoặc trích frame lỗi — check log `[uploader]` "trích thumbnail lỗi"; upload vẫn chạy không thumb. Cần `ffmpeg` trên Colab VM (image mặc định đã có) |
 | Exit code 1 (Actions đỏ) | Lỗi tạm thời — không can thiệp, sweep tự RETRY |
 | Exit code 2 (Actions đỏ) | Lỗi vĩnh viễn — xem cột error trên Sheet |
 | Burst tin nhắn → run bị `cancelled`, chỉ 1 job chạy | `concurrency.queue` mặc định `single` chỉ giữ 1 run pending và huỷ run pending cũ → đã đặt `queue: max` cho phép tối đa 100 run pending xử lý FIFO |
