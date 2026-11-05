@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from telethon.tl.types import DocumentAttributeVideo
 
 from worker.config import Config
+from worker.downloader import extract_thumbnail, probe_video_metadata
 
 log = logging.getLogger(__name__)
 
@@ -65,8 +68,6 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
 
     # Metadata video (width/height/duration) — Telegram player cần để stream
     # đúng: thiếu → màn đen trên web, sai tỉ lệ khung trên app.
-    from worker.downloader import probe_video_metadata
-    from telethon.tl.types import DocumentAttributeVideo
     try:
         width, height, duration = probe_video_metadata(path)
     except Exception:
@@ -75,6 +76,16 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
         w=width, h=height, duration=duration, supports_streaming=True
     )] if width and height else None)
 
+    thumb_path = None
+    try:
+        seek = 1.0 if duration <= 4 else min(duration / 4, 30.0)
+        thumb_path = extract_thumbnail(
+            path, os.path.join(os.path.dirname(path), "thumb.jpg"),
+            seek_seconds=seek)
+    except Exception:
+        log.exception("trích thumbnail lỗi (bỏ qua): %s", caption)
+        thumb_path = None
+
     try:
         msg = await client.send_file(
             cfg.target_channel,
@@ -82,10 +93,16 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
             caption=caption[:1024],
             supports_streaming=True,
             attributes=attributes,
+            thumb=thumb_path,
             progress_callback=progress,
         )
         return msg.id
     except Exception as e:
         raise UploadError(f"send_file thất bại: {type(e).__name__}: {e}") from None
     finally:
+        if thumb_path and os.path.exists(thumb_path):
+            try:
+                os.unlink(thumb_path)
+            except OSError:
+                log.exception("không xóa được thumb tạm: %s", thumb_path)
         await _safe_disconnect(client)
