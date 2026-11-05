@@ -323,6 +323,33 @@ def test_write_bootstrap_pins_cryptg(monkeypatch):
     monkeypatch.setenv("WORKER_REPO", "owner/repo")
     src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
     assert "cryptg==0.5.2" in src
+    assert "sys.version_info >= (3, 15)" in src
+
+
+def _exec_bootstrap_deps(monkeypatch, version_info):
+    """Exec the generated deps snippet; return the pip deps list."""
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
+    start = src.index("deps = [")
+    end = src.index("run([sys.executable", start)
+    snippet = src[start:end]
+    fake_sys = types.SimpleNamespace(version_info=version_info)
+    ns = {"__builtins__": __builtins__, "sys": fake_sys}
+    exec(snippet, ns)
+    return ns["deps"]
+
+
+def test_bootstrap_skips_cryptg_on_python_3_15(monkeypatch):
+    deps = _exec_bootstrap_deps(monkeypatch, version_info=(3, 15, 0, "final", 0))
+    assert "cryptg==0.5.2" not in deps
+    assert "telethon==1.45.0" in deps
+    assert "gspread>=6.0,<7" in deps
+
+
+def test_bootstrap_keeps_cryptg_below_3_15(monkeypatch):
+    deps = _exec_bootstrap_deps(
+        monkeypatch, version_info=(3, 14, 9, "final", 0))
+    assert "cryptg==0.5.2" in deps
 
 
 def test_write_bootstrap_prints_python_version(monkeypatch):
