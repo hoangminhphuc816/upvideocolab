@@ -73,9 +73,6 @@ class SheetQueue:
             return 0
 
     # --- lifecycle ---
-    def create_table_if_missing(self) -> None:
-        if not self.sheet.get_all_values():
-            self.sheet.insert_row(COLUMNS, 1)
 
     @staticmethod
     def new_job_id() -> str:
