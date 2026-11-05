@@ -378,3 +378,22 @@ def test_release_waiting_gui_mot_batch_request():
     assert q.sheet.rows[2][1] == "WAITING"
     assert q.sheet.rows[3][1] == "PENDING"
     assert q.sheet.rows[3][5] == "500"
+
+
+def test_job_cache_not_stale_after_row_insert():
+    rows = [HDR,
+            ["JOB-1", "PENDING", "u1", "42", "100", "", "", "", "", "0", "0"],
+            ["JOB-2", "PENDING", "u2", "42", "50", "", "", "", "", "0", "0"]]
+    q = q_with(rows, now_ts=5000)
+    # Populate cache: JOB-2 at row 3.
+    q.set_status("JOB-2", "CLAIMED")
+    assert q.sheet.rows[2][1] == "CLAIMED"
+    # External insert at row 2 shifts JOB-2 to row 4.
+    q.sheet.insert_row(["JOB-X", "PENDING", "ux", "42", "1", "", "", "", "", "0", "0"], 2)
+    # A full-scan method must NOT trust the stale cached index (row 3 now = JOB-1).
+    q.next_job()
+    q.set_status("JOB-2", "DOWNLOADING")
+    job2 = [r for r in q.sheet.rows if r[0] == "JOB-2"][0]
+    assert job2[1] == "DOWNLOADING"
+    job1 = [r for r in q.sheet.rows if r[0] == "JOB-1"][0]
+    assert job1[1] == "PENDING"  # stale index would have overwritten JOB-1

@@ -65,6 +65,9 @@ class SheetQueue:
                 return i
         return None
 
+    def _invalidate_job_cache(self) -> None:
+        self._job_cache.clear()
+
     @staticmethod
     def _to_int(s: str) -> int:
         try:
@@ -85,10 +88,12 @@ class SheetQueue:
         row = [job_id, "PENDING", url, str(chat_id), str(self._now_ts()),
                "", "", "", "", "0", "0", "", url_alt]
         self.sheet.append_row(row)
+        self._invalidate_job_cache()
         return job_id
 
     def next_job(self) -> Job | None:
         """RETRY ưu tiên trước PENDING; cùng mức ưu tiên thì created_at nhỏ nhất."""
+        self._invalidate_job_cache()
         candidates: list[tuple[int, int, int, list[str]]] = []
         for i, row in enumerate(self.sheet.get_all_values(), start=1):
             if i < 2:
@@ -117,6 +122,7 @@ class SheetQueue:
         Dùng update_cell trực tiếp theo row index (không gọi set_status) để
         tránh quét lại toàn Sheet cho từng row.
         """
+        self._invalidate_job_cache()
         released = 0
         now = self._now_ts()
         data = []
@@ -232,6 +238,7 @@ class SheetQueue:
 
     def count_done_since(self, ts: int) -> int:
         """Đếm job DONE có updated_at (fallback created_at) >= ts — dùng cho throttle 4/ngày."""
+        self._invalidate_job_cache()
         n = 0
         for i, row in enumerate(self.sheet.get_all_values(), start=1):
             if i < 2:
@@ -251,6 +258,7 @@ class SheetQueue:
         Trả về danh sách job_id vừa bị FAILED để caller notify.
         Tuổi tính bằng updated_at (fallback created_at) so với now.
         """
+        self._invalidate_job_cache()
         cutoff = self._now_ts() - older_than_min * 60
         newly_failed: list[str] = []
         for i, row in enumerate(self.sheet.get_all_values(), start=1):
