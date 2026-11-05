@@ -548,3 +548,46 @@ async def test_run_once_blocking_reraises_thread_exception_not_index_error():
         from worker.main import _run_once_blocking
         with pytest.raises(RuntimeError, match="gspread boom"):
             _run_once_blocking(make_cfg())
+
+@pytest.mark.asyncio
+async def test_run_once_primary_403_falls_back_to_alt(tmp_path):
+    from worker.downloader import DownloadError
+    q = MagicMock()
+    q.next_job.return_value = make_job_addr(url_alt="https://x/lo.mp4")
+    q.claim.return_value = True
+    fake = tmp_path / "v.mp4"
+    fake.write_bytes(b"")
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.choose_source", return_value=("https://x/hi.mp4", None)), \
+         patch("worker.main.probe_range_support", return_value=False), \
+         patch("worker.main.download_to_file",
+               side_effect=[DownloadError("HTTP 403 Forbidden"),
+                            (str(fake), 1024)]), \
+         patch("worker.main.validate_video"), \
+         patch("worker.main.upload_to_channel", AsyncMock(return_value=99)), \
+         patch("worker.main.notify_done"), \
+         patch("os.unlink"):
+        from worker.main import run_once
+        rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+    assert rc == 0
+    assert q.set_status.call_count >= 2
+    assert "FAILED" not in statuses_written(q)
+
+
+@pytest.mark.asyncio
+async def test_run_once_primary_403_alt_404_marks_failed(tmp_path):
+    from worker.downloader import DownloadError
+    q = MagicMock()
+    q.next_job.return_value = make_job_addr(url_alt="https://x/lo.mp4")
+    q.claim.return_value = True
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.choose_source", return_value=("https://x/hi.mp4", None)), \
+         patch("worker.main.probe_range_support", return_value=False), \
+         patch("worker.main.download_to_file",
+               side_effect=DownloadError("HTTP 403 Forbidden")), \
+         patch("worker.main.notify_failed") as nf:
+        from worker.main import run_once
+        rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+    assert rc == 2
+    assert statuses_written(q) == ["DOWNLOADING", "FAILED"]
+    nf.assert_called_once()

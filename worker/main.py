@@ -10,7 +10,7 @@ import time
 
 from worker.config import Config, SWEEP_REQUIRED, load_config
 from worker.downloader import (
-    CHUNK_SIZE, DownloadError, OversizeError, TELEGRAM_MAX,
+    CHUNK_SIZE, DownloadError, TELEGRAM_MAX,
     assemble, choose_source, download_chunk, download_to_file,
     probe_range_support, validate_video,
 )
@@ -146,10 +146,10 @@ async def run_once(cfg: Config) -> int:
             try:
                 path, part = _run_download(src, cfg, queue, job, on_progress)
                 break
-            except OversizeError:
+            except DownloadError as e:
                 if idx == len(candidates) - 1:
                     raise
-                log.warning("nguồn %s vượt ngưỡng 1.9GB giữa luồng — thử bản dự phòng", src)
+                log.warning("nguồn %s lỗi (%s) — thử bản dự phòng", src, e)
 
         validate_video(path)
 
