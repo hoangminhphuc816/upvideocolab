@@ -190,7 +190,11 @@ def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(bootstrap)
         cmd = ["colab", "run", "--timeout", COLAB_RUN_TIMEOUT_S, path]
-        proc = subprocess.run(cmd, check=False)
+        try:
+            proc = subprocess.run(cmd, check=False)
+        except FileNotFoundError:
+            _annotate("error", f"{job.job_id}: không tìm thấy binary 'colab' trên runner — dispatch thất bại")
+            return 1
         return _classify_run(queue, job.job_id, worker_id, proc.returncode)
     finally:
         try:
@@ -201,6 +205,10 @@ def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json:
 
 
 def main() -> int:
+    missing = [k for k in (*_REQUIRED_ENV_KEYS, "COLAB_TOKEN_JSON", "WORKER_REPO")
+               if not os.environ.get(k)]
+    if missing:
+        raise ValueError(f"thiếu biến môi trường bắt buộc: {', '.join(sorted(missing))}")
     cfg = Config(
         telethon_session=os.environ["TELETHON_SESSION"],
         api_id=int(os.environ["TELEGRAM_API_ID"]),

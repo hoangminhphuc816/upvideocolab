@@ -356,3 +356,37 @@ def test_write_bootstrap_prints_python_version(monkeypatch):
     monkeypatch.setenv("WORKER_REPO", "owner/repo")
     src = _write_bootstrap(WORKER_ENV, worker_id="colab-abc123")
     assert "[bootstrap] python" in src
+
+
+def test_dispatch_colab_binary_missing_is_red(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    monkeypatch.setenv("COLAB_TOKEN_JSON", "{}")
+    cfg = MagicMock()
+    q = MagicMock()
+    q.next_job.return_value = Job("JOB-1", "PENDING", "u", 42, 1, None, "", None, "", 0, "0", 2, "")
+    q.count_done_since.return_value = 0
+    q.release_waiting.return_value = 0
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run",
+               side_effect=FileNotFoundError("No such file or directory: 'colab'")):
+        from controller.colab_dispatch import dispatch_to_colab
+        rc = dispatch_to_colab(cfg, worker_env={}, colab_token_json="{}")
+    assert rc == 1
+    assert "::error::" in capsys.readouterr().out
+
+
+def test_main_missing_env_raises_value_error(monkeypatch):
+    from controller.colab_dispatch import main
+    for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "TELEGRAM_API_HASH",
+                "TARGET_CHANNEL", "OWNER_CHAT_ID", "GCP_SA_JSON", "SHEET_ID",
+                "BOT_TOKEN", "COLAB_TOKEN_JSON", "WORKER_REPO"]:
+        monkeypatch.setenv(key, "x")
+    for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "GCP_SA_JSON", "COLAB_TOKEN_JSON"]:
+        monkeypatch.delenv(key)
+    with pytest.raises(ValueError, match="thiếu biến môi trường"):
+        main()
+    try:
+        main()
+    except ValueError as e:
+        for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "GCP_SA_JSON", "COLAB_TOKEN_JSON"]:
+            assert key in str(e), f"{key} missing from ValueError message: {e}"
