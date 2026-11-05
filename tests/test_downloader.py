@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from worker.downloader import download_to_file, validate_video, DownloadError, TELEGRAM_MAX, probe_range_support, download_chunk, assemble, probe_size_curl, choose_source, OversizeError
+from worker.downloader import download_to_file, validate_video, DownloadError, TELEGRAM_MAX, probe_range_support, download_chunk, assemble, probe_size_curl, choose_source, OversizeError, extract_thumbnail
 
 
 def fake_response(status=200, chunks=(b"a" * 1024,), content_length=None, iter_raises=False):
@@ -279,3 +279,30 @@ def test_download_chunk_equal_limit_raises_oversize_error(tmp_path):
          patch("worker.downloader.requests.get", return_value=r):
         with pytest.raises(OversizeError):
             download_chunk("https://x/v.mp4", start=0, dest_dir=str(tmp_path))
+
+
+def test_extract_thumbnail_success(tmp_path):
+    fake = tmp_path / "thumb.jpg"
+    fake.write_bytes(b"")  # ffmpeg creates it; fake the postcondition instead:
+    def fake_run(*a, **k):
+        fake.write_bytes(b"\xff\xd8jpeg-bytes")
+        return MagicMock(returncode=0, stdout="", stderr="")
+    with patch("worker.downloader.subprocess.run", side_effect=fake_run) as run:
+        out = extract_thumbnail("/tmp/video.mp4", str(fake), seek_seconds=1.0)
+    assert out == str(fake)
+    cmd = run.call_args.args[0]
+    assert "ffmpeg" in cmd[0]
+    assert "-vframes" in cmd and "1" in cmd
+    assert "scale=320:-1" in cmd
+
+
+def test_extract_thumbnail_missing_binary_returns_none(tmp_path):
+    with patch("worker.downloader.subprocess.run",
+               side_effect=FileNotFoundError("ffmpeg missing")):
+        assert extract_thumbnail("/x.mp4", str(tmp_path / "t.jpg")) is None
+
+
+def test_extract_thumbnail_failed_run_returns_none(tmp_path):
+    with patch("worker.downloader.subprocess.run",
+               return_value=MagicMock(returncode=1, stderr="boom")):
+        assert extract_thumbnail("/x.mp4", str(tmp_path / "t.jpg")) is None

@@ -271,3 +271,33 @@ def probe_video_metadata(path: str) -> tuple[int, int, int]:
     except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError):
         return 0, 0, 0
 
+
+def extract_thumbnail(video_path: str, thumb_path: str,
+                      seek_seconds: float = 1.0) -> str | None:
+    """Trích 1 frame JPEG ≤320px cho Telegram thumbnail (best-effort).
+
+    Telethon `send_file` chỉ dùng `thumb` khi là file `.jpg` nhỏ
+    (≤320px, Bot API khuyến nghị <200 kB); repo không có Pillow nên
+    ffmpeg tự scale+encode JPEG luôn. Mọi lỗi → None (caller upload
+    không thumb như cũ), không bao giờ raise.
+    """
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-ss", str(seek_seconds), "-i", video_path,
+             "-vframes", "1", "-vf", "scale=320:-1", "-q:v", "3", thumb_path],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log.warning("không trích được thumbnail (ffmpeg): %s", e)
+        return None
+    if proc.returncode != 0:
+        log.warning("ffmpeg trích thumbnail lỗi: %s", (proc.stderr or "")[:200])
+        return None
+    try:
+        if not os.path.exists(thumb_path) or os.path.getsize(thumb_path) == 0:
+            return None
+    except OSError:
+        return None
+    return thumb_path
+
