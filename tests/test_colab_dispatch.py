@@ -375,6 +375,88 @@ def test_dispatch_colab_binary_missing_is_red(tmp_path, monkeypatch, capsys):
     assert "::error::" in capsys.readouterr().out
 
 
+def _retry_fixture(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    monkeypatch.setenv("WORKER_ID", "override-worker")
+    q = MagicMock()
+    q.next_job.return_value = MagicMock(job_id="JOB-1", status="PENDING", url="u")
+    q.count_done_since.return_value = 0
+    history = tmp_path / "history"
+    return q, history
+
+
+def test_dispatch_retries_preclaim_failure_then_succeeds(tmp_path, monkeypatch, capsys):
+    q, history = _retry_fixture(tmp_path, monkeypatch)
+    q.get_job.return_value = MagicMock(status="PENDING", worker="", error="")
+    run = MagicMock(side_effect=[MagicMock(returncode=1), MagicMock(returncode=0)])
+    sleeps = []
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run", run), \
+         patch("controller.colab_dispatch._sleep", sleeps.append), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", history):
+        from controller.colab_dispatch import dispatch_to_colab
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
+    assert rc == 0
+    assert run.call_count == 2
+    assert sleeps == [20]
+    assert "thử lại sau 20s" in capsys.readouterr().out
+
+
+def test_dispatch_khong_retry_khi_worker_da_claim(tmp_path, monkeypatch, capsys):
+    q, history = _retry_fixture(tmp_path, monkeypatch)
+    q.get_job.return_value = MagicMock(status="DOWNLOADING", worker="override-worker", error="")
+    run = MagicMock(return_value=MagicMock(returncode=1))
+    sleeps = []
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run", run), \
+         patch("controller.colab_dispatch._sleep", sleeps.append), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", history):
+        from controller.colab_dispatch import dispatch_to_colab
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
+    assert rc == 0
+    assert run.call_count == 1
+    assert sleeps == []
+    assert "::warning::JOB-1" in capsys.readouterr().out
+
+
+def test_dispatch_het_luot_retry_van_do(tmp_path, monkeypatch, capsys):
+    q, history = _retry_fixture(tmp_path, monkeypatch)
+    q.get_job.return_value = MagicMock(status="PENDING", worker="", error="")
+    run = MagicMock(return_value=MagicMock(returncode=1))
+    sleeps = []
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run", run), \
+         patch("controller.colab_dispatch._sleep", sleeps.append), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", history):
+        from controller.colab_dispatch import dispatch_to_colab
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
+    assert rc == 1
+    assert run.call_count == 3
+    assert sleeps == [20, 40]
+    out = capsys.readouterr().out
+    assert out.count("::error::JOB-1") == 1
+    assert "sweep sau" in out
+
+
+def test_dispatch_thanh_cong_ngay_khong_sleep(tmp_path, monkeypatch):
+    q, history = _retry_fixture(tmp_path, monkeypatch)
+    run = MagicMock(return_value=MagicMock(returncode=0))
+    sleeps = []
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch.subprocess.run", run), \
+         patch("controller.colab_dispatch._sleep", sleeps.append), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", history):
+        from controller.colab_dispatch import dispatch_to_colab
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
+    assert rc == 0
+    assert run.call_count == 1
+    assert sleeps == []
+
+
 def test_main_missing_env_raises_value_error(monkeypatch):
     from controller.colab_dispatch import main
     for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "TELEGRAM_API_HASH",

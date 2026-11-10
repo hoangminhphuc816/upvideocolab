@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -35,6 +36,9 @@ COLAB_RUN_TIMEOUT_S = os.environ.get("COLAB_RUN_TIMEOUT_S", "7200")
 
 TZ_VN = "Asia/Ho_Chi_Minh"  # UTC+7, không có DST
 DAILY_UPLOAD_LIMIT = int(os.environ.get("DAILY_UPLOAD_LIMIT", "4"))
+DISPATCH_ATTEMPTS = 3
+DISPATCH_BACKOFF_S = 20
+_sleep = time.sleep
 
 
 def day_start_epoch(now: float | None = None) -> int:
@@ -87,7 +91,8 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
         return 1
     if job.worker != worker_id:
         _annotate("error", f"{job_id}: colab run exit {returncode}, Sheet={job.status}, "
-                            f"worker={job.worker} != {worker_id} — dispatch thất bại")
+                            f"worker={job.worker} != {worker_id} — dispatch thất bại; "
+                            f"job vẫn PENDING/RETRY, sweep sau sẽ thử lại")
         return 1
     if job.status in ("DONE", "FAILED"):
         detail = f" ({job.error})" if job.error else ""
@@ -160,6 +165,37 @@ sys.exit(worker_main())
 """
 
 
+def _job_claimed(queue: SheetQueue, job_id: str, worker_id: str) -> bool:
+    """True nếu VM của run này đã claim job (cột worker đã ghi)."""
+    job = queue.get_job(job_id)
+    return job is not None and job.worker == worker_id
+
+
+def _run_colab_with_retry(cmd: list[str], queue: SheetQueue, job_id: str,
+                          worker_id: str, attempts: int = DISPATCH_ATTEMPTS,
+                          backoff: float = DISPATCH_BACKOFF_S) -> int:
+    """Chạy `colab run`, retry khi thất bại TRƯỚC lúc VM claim job.
+
+    Assign timeout / kernel-startup failure đều để cột worker rỗng ⇒ retry an toàn
+    (chưa có job nào bị xử lý dở). Khi worker đã claim thì trả nguyên exit code để
+    `_classify_run` áp semantics cũ (giữa chừng → xanh + warning, sweep RETRY).
+    """
+    returncode = 1
+    for attempt in range(1, attempts + 1):
+        returncode = subprocess.run(cmd, check=False).returncode
+        if returncode == 0:
+            return 0
+        if _job_claimed(queue, job_id, worker_id):
+            return returncode
+        if attempt == attempts:
+            break
+        wait = backoff * (2 ** (attempt - 1))
+        _annotate("warning", f"{job_id}: colab run exit {returncode} trước khi worker "
+                             f"claim job (lần {attempt}/{attempts}) — thử lại sau {wait:.0f}s")
+        _sleep(wait)
+    return returncode
+
+
 def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json: str) -> int:
     _materialize_token(colab_token_json)
     queue = SheetQueue(cfg)
@@ -191,11 +227,11 @@ def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json:
             f.write(bootstrap)
         cmd = ["colab", "run", "--timeout", COLAB_RUN_TIMEOUT_S, path]
         try:
-            proc = subprocess.run(cmd, check=False)
+            returncode = _run_colab_with_retry(cmd, queue, job.job_id, worker_id)
         except FileNotFoundError:
             _annotate("error", f"{job.job_id}: không tìm thấy binary 'colab' trên runner — dispatch thất bại")
             return 1
-        return _classify_run(queue, job.job_id, worker_id, proc.returncode)
+        return _classify_run(queue, job.job_id, worker_id, returncode)
     finally:
         try:
             Path(path).unlink()
