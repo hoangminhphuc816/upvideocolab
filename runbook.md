@@ -301,6 +301,7 @@ python -m controller.colab_dispatch
 | Hiện tượng | Nguyên nhân / xử lý |
 | --- | --- |
 | Actions run không xuất hiện sau /dl | Đúng thiết kế: tin nhắn chỉ xếp hàng, chờ sweep 2h kế tiếp. Nếu quá 2h vẫn không có run: kiểm tra cron-job.org và đã deploy GAS mới chưa |
+| Run đỏ: `colab run exit 1`, log có `ReadTimeout ... colab.research.google.com ... read timeout=120` | Colab assign chậm/quá tải (timeout 120s mặc định của google-auth). Controller tự thử lại 3 lần (cách 20s/40s) khi VM **chưa** claim job. Hết lượt mà vẫn lỗi: run đỏ nhưng job vẫn `PENDING`, sweep 2h sau thử tiếp — không mất job, không cần sửa tay |
 | `AuthKeyDuplicatedError` Telethon | 1 session dùng 2 nơi — chắc chắn không chạy worker local song song với Actions |
 | `FloodWaitError` | Worker đã set flood_sleep_threshold=120; nếu vẫn chờ lâu hơn, để job treo → sweep RETRY |
 | Sheet `PERMISSION_DENIED` | SA chưa được Share Editor Sheet |
