@@ -153,6 +153,7 @@ def test_dispatch_worker_never_claimed_is_red(tmp_path, monkeypatch, capsys):
     run = MagicMock(return_value=MagicMock(returncode=1))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run", run), \
+         patch("controller.colab_dispatch._sleep", lambda _s: None), \
          patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
     assert rc == 1
@@ -171,6 +172,7 @@ def test_dispatch_retry_with_stale_worker_is_red(tmp_path, monkeypatch, capsys):
     run = MagicMock(return_value=MagicMock(returncode=1))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run", run), \
+         patch("controller.colab_dispatch._sleep", lambda _s: None), \
          patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
     assert rc == 1
