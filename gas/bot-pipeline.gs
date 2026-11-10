@@ -2,7 +2,7 @@
 // BOT PIPELINE — bot MỚI chạy trong Apps Script project RIÊNG (không đụng bot cũ).
 // Bot cũ (GetXBot) giữ nguyên làm backup; bot này chỉ làm một việc:
 //   nhận link X/Twitter từ CHỦ SỞ HỞ → resolve MP4 → tạo job vào Sheet queue
-//   → dispatch GitHub worker (tải video + upload lên kênh riêng tư).
+//   (KHÔNG dispatch GitHub; cron sweep 2h/lần của Actions sẽ nhặt job).
 //
 // BẢO MẬT — 2 lớp (chỉ bạn dùng được, người lạ bị bỏ qua im lặng):
 //   Lớp 1: WEBHOOK_SECRET — Telegram gửi header X-Telegram-Bot-Api-Secret-Token
@@ -19,14 +19,12 @@
 //        OWNER_CHAT_ID    = chat_id của bạn (@userinfobot)
 //        WEBHOOK_SECRET   = chuỗi ngẫu nhiên bất kỳ (vd: openssl rand -hex 32)
 //        SHEET_ID         = id Google Sheet queue
-//        WORKER_REPO      = owner/repo repo pipeline
-//        GITHUB_PAT       = PAT (Contents: RW)
 //      → Who has access: Anyone  (secret query token chặn người giả)
 //   5. Đăng ký webhook — LƯU Ý: secret phải nằm TRONG URL (không dùng
 //      secret_token= của Telegram vì GAS không đọc được request headers):
 //        URL_EXEC_TOKEN = <URL_EXEC>%3Ftoken%3D<WEBHOOK_SECRET>
 //        curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<URL_EXEC_TOKEN>&allowed_updates=%5B%22message%22%5D&drop_pending_updates=true"
-//   6. Gửi thử 1 link X từ tài khoản của bạn → nhận "Đã tạo job ...".
+//   6. Gửi thử 1 link X từ tài khoản của bạn → nhận "Đã xếp hàng job ...".
 //
 // ROLLBACK: bot cũ không bị ảnh hưởng gì. Tắt bot mới:
 //   curl "https://api.telegram.org/bot<BOT_TOKEN>/deleteWebhook"
@@ -179,11 +177,6 @@ function doPost(e) {
       return _ok200('ok');
     }
 
-    // Dispatch ngoài lock: repository_dispatch có thể chậm 15s, không giữ
-    // lock của các message khác.
-    if (!atCap) {
-      dispatchToGitHub(jobId);
-    }
     console.log('PIPELINE-JOB ' + jobId + ' chat=' + chatId
         + (atCap ? ' WAITING' : ' PENDING'));
 
@@ -198,8 +191,8 @@ function doPost(e) {
           ? '\n🔁 Nếu bản gốc quá 1.9GB, sẽ tự dùng bản chất lượng thấp hơn.'
           : '';
       sendTelegramMessage(chatId,
-          "✅ Đã tạo job " + jobId + "\n" +
-          "🎬 Video đang được tải và upload lên kênh (vài phút tuỳ dung lượng)." + note + "\n" +
+          "⏳ Đã xếp hàng job " + jobId + "\n" +
+          "Job sẽ tự chạy khi tới lượt." + note + "\n" +
           "Bạn sẽ nhận thông báo ✅/❌ khi xong.");
     }
 
@@ -276,8 +269,8 @@ function getVideoCandidates(xUrl) {
 }
 
 // ----------------------------------------------------------------------------
-// Pipeline: tạo job vào Sheet queue + repository_dispatch (bản sao
-// gas/telegram-pipeline.gs — hợp đồng cột PHẢI khớp worker/sheet_queue.py)
+// Pipeline: tạo job vào Sheet queue (hợp đồng cột PHẢI khớp
+// worker/sheet_queue.py). Không dispatch — cron sweep 2h của Actions nhặt job.
 // ----------------------------------------------------------------------------
 function pipelineCreateJob(mp4Url, mp4AltUrl, chatId, statusId, status) {
   var props = PropertiesService.getScriptProperties();
@@ -299,40 +292,6 @@ function pipelineCreateJob(mp4Url, mp4AltUrl, chatId, statusId, status) {
     mp4AltUrl ? String(mp4AltUrl) : ''
   ]);
   return jobId;
-}
-
-function dispatchToGitHub(jobId) {
-  var props = PropertiesService.getScriptProperties();
-  var pat = props.getProperty('GITHUB_PAT');
-  var repo = props.getProperty('WORKER_REPO');
-  if (!pat || !repo) {
-    console.warn('Thiếu GITHUB_PAT hoặc WORKER_REPO trong Script Properties');
-    return -1;
-  }
-  try {
-    var resp = UrlFetchApp.fetch('https://api.github.com/repos/' + repo + '/dispatches', {
-      method: 'post',
-      contentType: 'application/json',
-      headers: {
-        'Authorization': 'token ' + pat,
-        'Accept': 'application/vnd.github+json'
-      },
-      payload: JSON.stringify({
-        event_type: 'video-job',
-        client_payload: { job_id: jobId }
-      }),
-      muteHttpExceptions: true,
-      timeoutSeconds: 15
-    });
-  } catch (err) {
-    console.warn('repository_dispatch lỗi transport: ' + err);
-    return -1;
-  }
-  if (resp.getResponseCode() !== 204) {
-    console.warn('repository_dispatch != 204: ' + resp.getResponseCode()
-        + ' ' + resp.getContentText());
-  }
-  return resp.getResponseCode();
 }
 
 // ----------------------------------------------------------------------------
