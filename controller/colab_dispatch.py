@@ -36,6 +36,10 @@ COLAB_RUN_TIMEOUT_S = os.environ.get("COLAB_RUN_TIMEOUT_S", "7200")
 
 TZ_VN = "Asia/Ho_Chi_Minh"  # UTC+7, không có DST
 DAILY_UPLOAD_LIMIT = int(os.environ.get("DAILY_UPLOAD_LIMIT", "4"))
+# Retry chỉ khi VM CHƯA claim job (cột worker != worker_id). Assign timeout của
+# google-auth là 120s/lần; 3 lần + backoff 20/40s đủ vượt spike mà không đốt
+# timeout-minutes 75 của job. Không retry sau khi worker đã claim: tránh 2 VM cùng
+# xử lý một job.
 DISPATCH_ATTEMPTS = 3
 DISPATCH_BACKOFF_S = 20
 _sleep = time.sleep
@@ -189,6 +193,9 @@ def _run_colab_with_retry(cmd: list[str], queue: SheetQueue, job_id: str,
             return returncode
         if attempt == attempts:
             break
+        nxt = queue.next_job()
+        if nxt is None or nxt.job_id != job_id:
+            return returncode
         wait = backoff * (2 ** (attempt - 1))
         _annotate("warning", f"{job_id}: colab run exit {returncode} trước khi worker "
                              f"claim job (lần {attempt}/{attempts}) — thử lại sau {wait:.0f}s")
