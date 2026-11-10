@@ -219,7 +219,7 @@ không bị đụng tới, vẫn chạy làm backup. Bot mới chỉ chấp nh�
    # phải trả {"ok":true,...}
    ```
 6. Test: từ tài khoản của bạn gửi 1 link X có video vào bot mới → nhận
-   `✅ Đã tạo job JOB-...`; từ tài khoản KHÁC nhắn bot → im lặng (verify whitelist).
+   `⏳ Đã xếp hàng job JOB-...`; từ tài khoản KHÁC nhắn bot → im lặng (verify whitelist).
 7. Tắt tạm / rollback bot mới (bot cũ không bị ảnh hưởng):
    `curl "https://api.telegram.org/bot<BOT_TOKEN>/deleteWebhook"`.
 
