@@ -126,19 +126,17 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
 4. Trong JSON lấy `client_email` → Share Sheet (nút Share) cho email đó, quyền **Editor**.
 5. Toàn bộ nội dung file JSON → Actions secret `GCP_SA_JSON`.
 
-## 6. GitHub PAT (GAS gọi repository_dispatch)
+## 6. GitHub PAT cho GAS — KHÔNG còn dùng (từ 2026-11-10)
 
-1. GitHub → Settings → Developer settings → Fine-grained tokens → Generate.
-2. Chỉ chọn repo worker; permission **Contents: Read and write**
-   (nếu 403/404 khi dispatch: thêm **Actions: Read and write**).
-3. Token → GAS Script Property `GITHUB_PAT`.
+Bot chỉ ghi job vào Sheet, **không** gọi GitHub. Job được dispatch bởi cron
+sweep 2h/lần (§7.4). Vì vậy GAS không cần `GITHUB_PAT`/`WORKER_REPO`:
+xoá 2 Script Property này sau khi deploy GAS mới (tuỳ chọn).
 
 ## 6b. GitHub PAT riêng cho cron-job.org (dispatch sweep)
 
 1. GitHub → Settings → Developer settings → Fine-grained tokens → Generate.
-2. Chỉ repo worker; permission **Actions: Read and write** (KHÁC §6 —
-   PAT §6 là Contents:RW cho repository_dispatch; PAT §6b là Actions:RW
-   cho workflow_dispatch).
+2. Chỉ repo worker; permission **Actions: Read and write** (§6 đã obsolete).
+   PAT §6b (Actions:RW) chỉ dùng cho cron-job.org gọi workflow_dispatch).
 3. Token KHÔNG lưu vào repo/GAS — chỉ dán vào headers của job
    `github-sweep-dispatch` trên console.cron-job.org.
 4. Rotate: token hết hạn (mặc định 90 ngày) → tạo token mới → PATCH job
@@ -159,7 +157,9 @@ quy trình phục hồi: chạy lại `tools/make_session.py` → update secret
    `WORKER_REPO` = `owner/repo` (repo chứa pipeline này).
 4. Sweep 2h/lần KHÔNG còn dùng `schedule` GitHub (bị tự tắt sau 60 ngày
    repo im tiếng). Thay bằng cron-job.org job `github-sweep-dispatch`
-   gọi `workflow_dispatch` (mode=sweep) mỗi 2h lúc :07. Nếu sweep ngừng:
+   gọi `workflow_dispatch` (mode=sweep) mỗi 2h lúc :07.
+   Đây là **cơ chế DUY NHẤT** dispatch job: tin nhắn Telegram chỉ xếp hàng
+   vào Sheet, không tạo Actions run. Nếu sweep ngừng:
    - Kiểm tra console.cron-job.org → History job (status phải OK/1xx-2xx).
    - Email failure từ cron-job.org = PAT hết hạn/token sai → rotate PAT
      (Task PAT trong §6b) rồi PATCH job qua console (headers → Authorization).
@@ -202,9 +202,9 @@ không bị đụng tới, vẫn chạy làm backup. Bot mới chỉ chấp nh�
 2. Tạo **Apps Script project MỚI** (script.google.com → New project) → dán
    toàn bộ `gas/bot-pipeline.gs` (file này tự chứa logic resolve getxbot +
    pipeline — không cần file cũ).
-3. Project Settings → Script Properties → thêm 6 biến:
+3. Project Settings → Script Properties → thêm 4 biến:
    `BOT_TOKEN`, `OWNER_CHAT_ID`, `WEBHOOK_SECRET` (chuỗi ngẫu nhiên, vd
-   `openssl rand -hex 32`), `SHEET_ID`, `WORKER_REPO`, `GITHUB_PAT`.
+   `openssl rand -hex 32`), `SHEET_ID`.
 4. Deploy → New deployment → Web app → Execute as: **Me** → Who has access:
    **Anyone** (an toàn — có secret query token chặn) → copy URL `/exec`.
 5. Đăng ký webhook — secret nằm TRONG URL (GAS không đọc được headers):
@@ -263,9 +263,9 @@ python -m controller.colab_dispatch
 ### c) End-to-end đầy đủ
 
 1. Nhắn `/dl <link bài X>` cho bot như bình thường.
-2. Kỳ vọng: bot vẫn trả lời link MP4 như cũ; vài giây sau Actions run mới
-   xuất hiện (`repository_dispatch`); controller cấp Colab VM; video vào
-   kênh; tin ✅ tới bạn.
+2. Kỳ vọng: bot trả lời "⏳ Đã xếp hàng job ..."; KHÔNG có Actions run mới
+   ngay lập tức; run sweep kế tiếp (≤2h) mới dispatch; controller cấp Colab VM;
+   video vào kênh; tin ✅ tới bạn.
 
 ### d) Recovery (checkpoint chunk resume)
 
@@ -300,7 +300,7 @@ python -m controller.colab_dispatch
 
 | Hiện tượng | Nguyên nhân / xử lý |
 | --- | --- |
-| Actions run không xuất hiện sau /dl | PAT hết hạn/sai scope; kiểm tra log GAS (console.warn) |
+| Actions run không xuất hiện sau /dl | Đúng thiết kế: tin nhắn chỉ xếp hàng, chờ sweep 2h kế tiếp. Nếu quá 2h vẫn không có run: kiểm tra cron-job.org và đã deploy GAS mới chưa |
 | `AuthKeyDuplicatedError` Telethon | 1 session dùng 2 nơi — chắc chắn không chạy worker local song song với Actions |
 | `FloodWaitError` | Worker đã set flood_sleep_threshold=120; nếu vẫn chờ lâu hơn, để job treo → sweep RETRY |
 | Sheet `PERMISSION_DENIED` | SA chưa được Share Editor Sheet |
@@ -329,15 +329,15 @@ python -m controller.colab_dispatch
 
 - Bot báo “Đã lưu job … vào hàng đợi” nhưng không thấy chạy:
   1. Kiểm tra row có `status=WAITING` và `created_at` là hôm qua/chưa.
-  2. Tin nhắn mới chỉ giúp nếu hôm nay chưa đủ 10 job (lúc đó controller
-     nhận PENDING mới → release + dispatch). Nếu đã đủ 10 job, tin nhắn
-     mới sẽ tạo thêm WAITING thay vì giải phóng.
+  2. Tin nhắn mới KHÔNG dispatch gì: job PENDING/WAITING mới chỉ được xử lý
+     ở sweep 2h kế tiếp. Tin nhắn không giúp job chạy sớm.
   3. Row WAITING tạo hôm nay chỉ được release sau 00:00 VN ngày mai.
      `mode=sweep` chỉ flip row có `created_at` trước 00:00 hôm nay; chạy
      sweep trong ngày không giải phóng được row vừa tạo.
   4. Xem log controller có `::notice::Đã giải phóng … job WAITING`.
   5. Nếu đã đủ 4 `DONE` hôm nay, job đã thành `PENDING` nhưng phải chờ mai.
-- Nếu sweep ngừng: `WAITING` không tự chuyển `PENDING`; sửa cron-job.org
+- Nếu sweep ngừng: job mới không được dispatch (đúng thiết kế: sweep là
+  cơ chế duy nhất) và `WAITING` không tự chuyển `PENDING`; sửa cron-job.org
   trước khi chờ job chạy.
 
 ## 10b. Kiểm tra GAS
@@ -511,7 +511,7 @@ thống.
 | Dùng CLI chính chủ `google-colab-cli`; `colab run` để VM tự teardown trong `finally` | Không truyền `--keep`, không tự viết keep-alive/heartbeat cho Colab |
 | Runtime CPU mặc định | Không GPU/TPU |
 | 1 tài khoản Google duy nhất | Không SSH/remote desktop/remote proxy; không share/resell quyền truy cập |
-| 4 upload/ngày: chặn ở controller TRƯỚC khi tạo session Colab (`controller/colab_dispatch.py:160-166`); GAS chỉ dispatch tối đa 10 job mới/ngày, phần vượt cap lưu `WAITING` (không dispatch) và được thả dần sau 00:00 VN (`gas/bot-pipeline.gs:152-166`, `worker/sheet_queue.py:110-134`) | Không containerize/lách anti-abuse; không nhiều tài khoản |
+| 4 upload/ngày: chặn ở controller TRƯỚC khi tạo session Colab (`controller/colab_dispatch.py:160-166`); job chỉ dispatch theo sweep 2h (tối đa 1 job/lần); GAS chỉ ghi job, phần vượt cap 10 job mới/ngày lưu `WAITING` và được thả dần sau 00:00 VN (`gas/bot-pipeline.gs:152-166`, `worker/sheet_queue.py:110-134`) | Không containerize/lách anti-abuse; không nhiều tài khoản |
 | Mỗi job 1 session ngắn; release VM ngay khi xong | Không giữ VM idle khi "no active executions" |
 | Giới hạn throughput đủ thấp để tránh nhóm "media serving" | Không dùng Colab làm CDN/file host |
 | Worker log tiến độ thật, tối đa ~1 dòng/15s và chỉ khi có byte mới (không spam iopub) | Không gửi heartbeat thừa; không toggle keep-alive |

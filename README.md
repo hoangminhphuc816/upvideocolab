@@ -12,7 +12,7 @@ GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab
     Bạn ──/dl <link X>──▶ Bot Telegram ──▶ GAS doPost (webhook)
                                             │ resolve URL (logic sẵn có)
                                             │ INSERT job PENDING/WAITING (Sheet)
-                                            │ POST repository_dispatch (PAT) — chỉ PENDING
+                                            │ (không dispatch — job chỉ xếp hàng)
                                             ▼
                               GitHub Actions controller (public repo, $0)
                                             │ release WAITING sau 00:00 VN
@@ -26,7 +26,8 @@ GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab
                                             │ Sheet: DONE + msg_id
                                             ▼
                               Controller notify → Bot thông báo ✅/❌
-    Cron 2h/lần (Actions sweep): job treo → RETRY ×3 → FAILED + ❌; cũng flip WAITING → PENDING.
+    Cron 2h/lần (Actions sweep) — CƠ CHẾ DISPATCH DUY NHẤT: job treo → RETRY ×3
+    → FAILED + ❌; flip WAITING → PENDING; dispatch tối đa 1 job/lần.
     Chunk checkpoint resume: session chết → part không còn → reset `dl:0` → tải lại từ đầu.
 
 ## Thành phần
@@ -39,8 +40,8 @@ GAS lưu thêm bản chất lượng thấp hơn (`url_alt`); worker trên Colab
 | `worker/uploader.py` | Telethon MTProto upload, StringSession |
 | `worker/notifier.py` | Bot API sendMessage kết quả |
 | `controller/colab_dispatch.py` | Controller: peek queue → `colab run` bootstrap → exit map |
-| `.github/workflows/worker.yml` | Controller workflow: repository_dispatch + cron sweep + workflow_dispatch |
-| `gas/bot-pipeline.gs` | GAS webhook (active): resolve URL, append PENDING/WAITING; dispatch chỉ PENDING |
+| `.github/workflows/worker.yml` | Controller workflow: sweep 2h (workflow_dispatch) + manual worker; không còn trigger dispatch từ GAS |
+| `gas/bot-pipeline.gs` | GAS webhook (active): resolve URL, append PENDING/WAITING; KHÔNG dispatch — chỉ xếp hàng chờ sweep 2h |
 | `gas/telegram-pipeline.gs` | Bản sao legacy — KHÔNG deploy cùng `bot-pipeline.gs` (trùng tên hàm) |
 | `tools/make_session.py` | Tạo StringSession local 1 lần |
 
@@ -54,6 +55,8 @@ Xem `runbook.md` — setup secrets (`COLAB_TOKEN_JSON`, `WORKER_REPO`), Sheet
 
 - Anti-abuse v3: session ngắn tự nhiên, KHÔNG keep-alive/hard-limit; checkpoint
   chunk resume trên Sheet; Colab CLI chính thức; `COLAB_TOKEN_JSON` KHÔNG xuống VM.
+- Nhịp job: tin nhắn chỉ xếp hàng; job chạy theo sweep 2h/lần. Tin nhắn KHÔNG
+  đánh thức hàng đợi (tránh chạy dồn 4 slot/ngày).
 - Fallback ngưỡng 1.9GB: `getVideoCandidates` (GAS) chọn best + một bậc bitrate
   thấp hơn; cột `url_alt` (13); `probe_size_curl` + `choose_source` chạy trên
   Colab (curl Range 0-0, không tải body, không dính CORS); `OversizeError`
