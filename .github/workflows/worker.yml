@@ -1,8 +1,6 @@
 name: video-controller
 
 on:
-  repository_dispatch:
-    types: [video-job]
   workflow_dispatch:
     inputs:
       mode:
@@ -11,9 +9,10 @@ on:
         options: [worker, sweep]
         default: worker
 
-# queue: max (GitHub Actions ≥ 2026-05-07): mặc định "single" chỉ giữ 1 run pending và
-# HUỶ run pending cũ khi có run mới ⇒ burst tin nhắn làm mất dispatch (job phải chờ sweep 2h).
-# max: tối đa 100 run pending, xử lý FIFO. Không dùng chung được với cancel-in-progress: true.
+# queue: max (GitHub Actions ≥ 2026-05-07): sweep 2h/lần có thể chồng khi runner
+# chậm; mặc định "single" sẽ HUỶ run pending cũ ⇒ mất một lượt dispatch.
+# max: tối đa 100 run pending, xử lý FIFO. Không dùng chung được với
+# cancel-in-progress: true.
 concurrency:
   group: video-worker
   cancel-in-progress: false
@@ -24,9 +23,7 @@ permissions:
 
 jobs:
   worker:
-    if: >-
-      github.event_name == 'repository_dispatch' ||
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'worker')
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'worker'
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
