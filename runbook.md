@@ -136,7 +136,7 @@ xoá 2 Script Property này sau khi deploy GAS mới (tuỳ chọn).
 
 1. GitHub → Settings → Developer settings → Fine-grained tokens → Generate.
 2. Chỉ repo worker; permission **Actions: Read and write** (§6 đã obsolete).
-   PAT §6b (Actions:RW) chỉ dùng cho cron-job.org gọi workflow_dispatch).
+   PAT §6b (Actions:RW) chỉ dùng cho cron-job.org gọi workflow_dispatch.
 3. Token KHÔNG lưu vào repo/GAS — chỉ dán vào headers của job
    `github-sweep-dispatch` trên console.cron-job.org.
 4. Rotate: token hết hạn (mặc định 90 ngày) → tạo token mới → PATCH job
