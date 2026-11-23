@@ -125,3 +125,51 @@ async def test_upload_deletes_thumb_on_success_and_on_error(tmp_path):
          pytest.raises(UploadError, match="boom"):
         await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
     assert not thumb.exists()
+
+
+@pytest.mark.asyncio
+async def test_upload_goi_heartbeat_moi_tick_tien_do():
+    """Upload >15 phut khong duoc de Sheet 'im lang' — heartbeat phai chay moi part."""
+    msg = MagicMock(); msg.id = 900
+    client = MagicMock()
+    client.start = AsyncMock(); client.disconnect = AsyncMock()
+
+    async def fake_send_file(*a, **kw):
+        kw["progress_callback"](512 * 1024, 4 * 512 * 1024)   # part 1/4
+        kw["progress_callback"](1024 * 1024, 4 * 512 * 1024)  # part 2/4
+        return msg
+
+    client.send_file = AsyncMock(side_effect=fake_send_file)
+    beats = []
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"), \
+         patch("worker.uploader.probe_video_metadata", return_value=(0, 0, 0)), \
+         patch("worker.uploader.extract_thumbnail", return_value=None):
+        mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1",
+                                      heartbeat=lambda: beats.append(1))
+    assert mid == 900
+    assert len(beats) == 2
+
+
+@pytest.mark.asyncio
+async def test_upload_heartbeat_loi_khong_abort_upload():
+    """Sheets 429/timeout khong duoc giet upload dang chay."""
+    msg = MagicMock(); msg.id = 901
+    client = MagicMock()
+    client.start = AsyncMock(); client.disconnect = AsyncMock()
+
+    async def fake_send_file(*a, **kw):
+        kw["progress_callback"](512 * 1024, 1024 * 1024)
+        return msg
+
+    client.send_file = AsyncMock(side_effect=fake_send_file)
+
+    def boom() -> None:
+        raise RuntimeError("sheets down")
+
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"), \
+         patch("worker.uploader.probe_video_metadata", return_value=(0, 0, 0)), \
+         patch("worker.uploader.extract_thumbnail", return_value=None):
+        mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1", heartbeat=boom)
+    assert mid == 901

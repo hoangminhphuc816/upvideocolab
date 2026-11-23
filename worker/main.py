@@ -153,9 +153,19 @@ async def run_once(cfg: Config) -> int:
 
         validate_video(path)
 
+        last_upload_touch = 0.0
+
+        def upload_heartbeat() -> None:
+            nonlocal last_upload_touch
+            now = time.monotonic()
+            if now - last_upload_touch >= 300:
+                last_upload_touch = now
+                queue.touch(job.job_id)
+
         queue.set_status(job.job_id, "UPLOADING")
         try:
-            msg_id = await upload_to_channel(cfg, path, caption=job.job_id)
+            msg_id = await upload_to_channel(cfg, path, caption=job.job_id,
+                                             heartbeat=upload_heartbeat)
         except UploadError:
             queue.set_checkpoint(job.job_id, "dl:full")
             raise

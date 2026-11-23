@@ -26,7 +26,8 @@ async def _safe_disconnect(client: TelegramClient) -> None:
         log.exception("disconnect lỗi (bỏ qua)")
 
 
-async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
+async def upload_to_channel(cfg: Config, path: str, caption: str,
+                            heartbeat=None) -> int:
     try:
         client = TelegramClient(
             StringSession(cfg.telethon_session),
@@ -61,6 +62,11 @@ async def upload_to_channel(cfg: Config, path: str, caption: str) -> int:
         nonlocal last
         if not total:
             return
+        if heartbeat is not None:
+            try:
+                heartbeat()
+            except Exception:
+                log.exception("heartbeat upload loi (bo qua): %s", caption)
         pct = sent * 100 // total
         if pct % 10 == 0 and pct != last:
             last = pct

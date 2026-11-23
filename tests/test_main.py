@@ -591,3 +591,38 @@ async def test_run_once_primary_403_alt_404_marks_failed(tmp_path):
     assert rc == 2
     assert statuses_written(q) == ["DOWNLOADING", "FAILED"]
     nf.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_upload_nhip_tim_throttle_300s(tmp_path):
+    """Pha upload phai touch Sheet, nhung khong qua 1 lan/300s."""
+    q = MagicMock()
+    q.next_job.return_value = make_job()
+    q.claim.return_value = True
+    fake = tmp_path / "v.mp4"
+    fake.write_bytes(b"")
+    clock = scripted_clock(1000.0, 1100.0, 1400.0)   # 100s (<300) rồi 300s (đủ)
+    sent = {}
+
+    async def fake_upload(cfg, path, caption, heartbeat=None):
+        sent["heartbeat"] = heartbeat
+        return 777
+
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.time", MagicMock(monotonic=clock)), \
+         patch("worker.main.probe_range_support", return_value=False), \
+         patch("worker.main.download_to_file", return_value=(str(fake), 1024)), \
+         patch("worker.main.validate_video"), \
+         patch("worker.main.upload_to_channel", fake_upload), \
+         patch("worker.main.notify_done"), \
+         patch("worker.main.notify_failed"), \
+         patch("os.unlink"):
+        from worker.main import run_once
+        await run_once(make_cfg(dl_dir=str(tmp_path)))
+        hb = sent["heartbeat"]
+        hb()                    # 1000.0 -> touch lan dau (last=0)
+        q.touch.assert_called_once_with("JOB-1")
+        hb()                    # 1100.0 -> chi 100s, bo qua
+        assert q.touch.call_count == 1
+        hb()                    # 1400.0 -> 300s ke tu nhiem truoc, touch
+        assert q.touch.call_count == 2
