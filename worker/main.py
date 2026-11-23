@@ -38,6 +38,17 @@ def _permanent(reason: str) -> bool:
     return any(s in reason for s in PERMANENT_SUBSTRINGS)
 
 
+def _owns_job(queue: SheetQueue, job_id: str, worker_id: str) -> bool:
+    """Fencing: chỉ worker đang giữ cột `worker` mới được upload.
+
+    Sweep đổi status → RETRY nhưng KHÔNG xoá cột `worker`; quyền thực sự được
+    chuyển khi VM kế tiếp claim (ghi đè cột). Đọc lại tươi ngay trước upload để
+    VM bị cướp không mở client Telegram thứ hai (AuthKeyDuplicatedError).
+    """
+    fresh = queue.get_job(job_id)
+    return fresh is not None and fresh.worker == worker_id
+
+
 def _try_notify_failed(cfg: Config, job_id: str, reason: str) -> None:
     try:
         notify_failed(cfg, job_id, reason)
@@ -152,6 +163,11 @@ async def run_once(cfg: Config) -> int:
                 log.warning("nguồn %s lỗi (%s) — thử bản dự phòng", src, e)
 
         validate_video(path)
+
+        if not _owns_job(queue, job.job_id, worker_id):
+            log.warning("mất quyền xử lý %s — bỏ pha upload, không mở client Telegram thứ hai",
+                        job.job_id)
+            return 0
 
         last_upload_touch = 0.0
 

@@ -195,6 +195,14 @@ def _stub_choose_source(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _assume_owns_job(request, monkeypatch):
+    """Fencing có test riêng; test khác mặc định coi worker đang giữ job."""
+    if "real_owns_job" not in request.keywords:
+        monkeypatch.setattr("worker.main._owns_job", lambda *a, **k: True)
+    yield
+
+
 def make_job_addr(url="https://x/v.mp4", url_alt=""):
     job = make_job()
     job.url = url
@@ -626,3 +634,39 @@ async def test_upload_nhip_tim_throttle_300s(tmp_path):
         assert q.touch.call_count == 1
         hb()                    # 1400.0 -> 300s ke tu nhiem truoc, touch
         assert q.touch.call_count == 2
+
+
+@pytest.mark.real_owns_job
+def test_owns_job_so_cot_worker_tuoi():
+    from worker.main import _owns_job
+    q = MagicMock()
+    q.get_job.return_value = make_job()
+    q.get_job.return_value.worker = "worker-a"
+    assert _owns_job(q, "JOB-1", "worker-a") is True
+    assert _owns_job(q, "JOB-1", "worker-b") is False
+    q.get_job.return_value = None
+    assert _owns_job(q, "JOB-1", "worker-a") is False
+
+
+@pytest.mark.asyncio
+async def test_run_once_khong_upload_khi_mat_quyen(tmp_path):
+    """VM bị sweep cướp trước pha upload → bỏ, KHÔNG mở client Telegram thứ hai."""
+    q = MagicMock()
+    q.next_job.return_value = make_job()
+    q.claim.return_value = True
+    fake = tmp_path / "v.mp4"
+    fake.write_bytes(b"")
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main._owns_job", return_value=False), \
+         patch("worker.main.probe_range_support", return_value=False), \
+         patch("worker.main.download_to_file", return_value=(str(fake), 1024)), \
+         patch("worker.main.validate_video"), \
+         patch("worker.main.upload_to_channel", AsyncMock(return_value=1)) as up, \
+         patch("worker.main.notify_done"), \
+         patch("worker.main.notify_failed"), \
+         patch("os.unlink"):
+        from worker.main import run_once
+        rc = await run_once(make_cfg(dl_dir=str(tmp_path)))
+    assert rc == 0
+    up.assert_not_called()
+    assert "UPLOADING" not in statuses_written(q)   # không ai được thấy job 'đang upload'
