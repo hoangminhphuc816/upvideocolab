@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from worker.config import Config
+from worker.config import Config, load_config
 from worker.sheet_queue import SheetQueue, STATUSES
 
 TOKEN_PATH = Path.home() / ".config" / "colab-cli" / "token.json"
@@ -325,18 +325,7 @@ def main() -> int:
     if missing:
         raise ValueError(f"thiếu biến môi trường bắt buộc: {', '.join(sorted(missing))}")
     check_timeout_budget(int(COLAB_RUN_TIMEOUT_S), JOB_TIMEOUT_MIN)
-    cfg = Config(
-        telethon_session=os.environ["TELETHON_SESSION"],
-        api_id=int(os.environ["TELEGRAM_API_ID"]),
-        api_hash=os.environ["TELEGRAM_API_HASH"],
-        target_channel=int(os.environ["TARGET_CHANNEL"]),
-        owner_chat_id=int(os.environ["OWNER_CHAT_ID"]),
-        sa_json=os.environ["GCP_SA_JSON"],
-        sheet_id=os.environ["SHEET_ID"],
-        bot_token=os.environ["BOT_TOKEN"],
-        sheet_name=os.environ.get("SHEET_NAME", "Jobs"),
-        dl_dir=os.environ.get("DL_DIR", "/tmp"),
-    )
+    cfg = load_config()
     worker_env = {k: os.environ[k] for k in _REQUIRED_ENV_KEYS}
     return dispatch_to_colab(cfg, worker_env, os.environ["COLAB_TOKEN_JSON"])
 

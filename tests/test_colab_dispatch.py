@@ -536,6 +536,26 @@ def test_dispatch_khong_retry_khi_head_doi_job(tmp_path, monkeypatch, capsys):
     assert "::error::JOB-1" in capsys.readouterr().out
 
 
+def test_main_chan_target_channel_truoc_khi_dispatch(monkeypatch, tmp_path):
+    """id dương/0 → phải chết trên runner, KHÔNG được tới dispatch_to_colab."""
+    from controller.colab_dispatch import main
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    monkeypatch.setenv("COLAB_TOKEN_JSON", "{}")
+    for key, val in [("TELETHON_SESSION", "1ApWapzMBX0mX0"), ("TELEGRAM_API_ID", "1"),
+                     ("TELEGRAM_API_HASH", "h"), ("TARGET_CHANNEL", "1234567890"),
+                     ("OWNER_CHAT_ID", "42"), ("GCP_SA_JSON", "{}"),
+                     ("SHEET_ID", "S"), ("BOT_TOKEN", "t")]:
+        monkeypatch.setenv(key, val)
+    dispatched = []
+    with patch("controller.colab_dispatch.dispatch_to_colab",
+               side_effect=lambda *a, **k: dispatched.append(1) or 0), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
+        with pytest.raises(ValueError, match="TARGET_CHANNEL"):
+            main()
+    assert dispatched == [], "dispatch_to_colab đã chạy ⇒ VM đã bị thuê"
+
+
 def test_main_missing_env_raises_value_error(monkeypatch, tmp_path):
     from controller.colab_dispatch import main
     for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "TELEGRAM_API_HASH",
