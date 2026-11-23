@@ -327,7 +327,7 @@ python -m controller.colab_dispatch
 | curl probe trả `None` (không đo được) | Worker vẫn tải bản gốc; guard giữa luồng chặn. Kiểm tra `curl --version` trên Colab, URL hết hạn (403/404), hoặc CDN bỏ Range. |
 | Telegram vẫn từ chối file <1.9GB | Hạ `TELEGRAM_MAX` trong `worker/downloader.py` (một dòng decimal bytes); chạy lại test. |
 | Bootstrap fail `Building wheel for cryptg` | pip có wheel? Kiểm tra `cryptg==0.5.2` đã pin trong `controller/colab_dispatch.py` + `requirements.txt`; xem log `[bootstrap] python` để biết Python của VM; nếu VM lên Python mới chưa có wheel → bump pin lên bản tương ứng hoặc bỏ dòng cryptg. Thứ tự fallback của Telethon là **cryptg → libssl (OpenSSL) → pyaes**, nên bỏ cryptg KHÔNG đồng nghĩa xuống pyaes: trên Colab/Ubuntu có OpenSSL thì vẫn nhanh (libssl), chỉ khi OpenSSL cũng thiếu mới rơi xuống pyaes pure-Python (chậm nhiều) |
-| Log có `đã unassign N Colab assignment mồ côi` | Bình thường: controller dọn VM sót từ run trước (thường do runner cancel) để giữ bất biến 1 session = 1 client. Nếu xuất hiện mỗi lần chạy ⇒ có job vượt `COLAB_RUN_TIMEOUT_S`, xem §10d |
+| Log có `đã unassign N Colab assignment mồ côi` | Bình thường: controller dọn VM sót từ run trước (thường do runner cancel) để giữ bất biến 1 session = 1 client. Nếu xuất hiện mỗi lần chạy ⇒ có job vượt `COLAB_RUN_TIMEOUT_S`, xem §10d. **Lưu ý**: bước dọn unassign MỌI assignment của account `COLAB_TOKEN_JSON` (không phân biệt VM pipeline vs VM bạn tự mở) nên account đó phải dành riêng — xem §10d |
 
 ### WAITING không chạy
 
@@ -391,7 +391,9 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
   chạy được `finally` teardown (không có signal handler trong CLI 0.6.0) ⇒ VM + kernel
   remote tiếp tục chạy cell ⇒ nếu VM khác claim cùng job thì 2 IP dùng chung auth key ⇒
   `AuthKeyDuplicatedError` và session chết vĩnh viễn. `check_timeout_budget` chặn cặp
-  số sai ngay khi controller khởi động.
+  **env/hằng** sai ngay khi controller khởi động; cặp với YAML thì `pytest`
+  (`test_workflow_timeout_minutes_khop_hang_so_code`) kiểm — runtime **không** đọc
+  `.github/workflows/worker.yml`, nên sửa mỗi YAML vẫn qua được `main()` và chỉ CI bắt.
 - **Từ 0.8.0** `--timeout` đổi thành *idle limit* (không còn deadline tuyệt đối) —
   trước khi nâng `google-colab-cli`, đọc lại mục này.
 - **Mặc định đang dùng**: `COLAB_RUN_TIMEOUT_S=7200` (~2 giờ) — hạn tuyệt đối
@@ -401,12 +403,20 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
   trong hạn; chính sách giữ session ngắn để giảm rủi ro anti-abuse.
 - **Cách đổi**: đổi **cả cặp** — env `COLAB_RUN_TIMEOUT_S`, hằng `JOB_TIMEOUT_MIN`
   (`controller/colab_dispatch.py`) và `timeout-minutes` của **cả hai** job trong
-  `.github/workflows/worker.yml`. `check_timeout_budget` từ chối mọi cặp sai
-  (`run_timeout_s + 600 > job_timeout_min * 60`) ngay khi controller khởi động.
+  `.github/workflows/worker.yml`. `check_timeout_budget` từ chối mọi cặp **env/hằng**
+  sai (`run_timeout_s + 600 > job_timeout_min * 60`) ngay khi controller khởi động;
+  lệch YAML so với `JOB_TIMEOUT_MIN` do test
+  `test_workflow_timeout_minutes_khop_hang_so_code` bắt trong CI (đếm đủ số job, nên
+  xoá hẳn một dòng `timeout-minutes` cũng fail).
   Chạy local: đặt biến trong `.env`/shell trước khi chạy
   `.venv/bin/python -m controller.colab_dispatch`.
   Trên GitHub Actions: đặt trong block `env:` của cả 2 job (đã có sẵn) — workflow
   không đọc `.env`.
+- **Tài khoản Colab phải dành riêng**: trước mỗi lượt thuê VM, controller gọi
+  `_stop_orphan_assignments()` và unassign **mọi** assignment còn sống của account
+  trong `COLAB_TOKEN_JSON` — kể cả VM bạn tự mở bằng tay trên cùng account. Cơ chế
+  này cần thiết vì VM mồ côi vẫn giữ kernel upload với `TELETHON_SESSION`, nhưng hệ
+  quả là không dùng chung account đó cho việc khác.
 - **Residual**: job quá lớn không xong trong hạn vẫn sẽ tốn tối đa **4 session**
   Colab rồi FAILED (1 lượt đầu + 3 retry, `max_retries=3`). Nếu gặp thường xuyên: cân nhắc giảm
   chất lượng đầu vào, cắt video nhỏ hơn, hoặc chốt nguồn URL thân thiện

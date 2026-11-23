@@ -102,12 +102,18 @@ def _annotate(level: str, message: str) -> None:
 
 
 def _stop_orphan_assignments() -> int:
-    """Unassign mọi VM còn sống trên tài khoản trước khi cấp VM mới.
+    """Unassign mọi VM còn sống trên tài khoản, ngay trước khi cấp VM mới.
 
     Concurrency group chỉ serialize các run; run bị cancel ở `timeout-minutes`
     KHÔNG teardown được VM (CLI 0.6.0 không có signal handler) ⇒ VM mồ côi vẫn giữ
     kernel đang upload với cùng TELETHON_SESSION. Dọn trước là điều kiện để giữ
     bất biến "1 session = 1 client".
+
+    PHẠM VI: trên runner, `sync_sessions()` không thấy `sessions.json` local nên trả
+    về TOÀN BỘ assignment của tài khoản Google đang cấu hình (`COLAB_TOKEN_JSON`) —
+    không phân biệt VM do pipeline tạo hay do người dùng tự mở. Vì vậy tài khoản đó
+    phải DÀNH RIÊNG cho pipeline; VM thủ công trên cùng account sẽ bị unassign ở mọi
+    lượt dispatch (kể cả sweep chạy `if: always()`). Xem runbook §10d.
     """
     from colab_cli.common import state
 

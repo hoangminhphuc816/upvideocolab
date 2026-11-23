@@ -444,12 +444,22 @@ def test_workflow_timeout_minutes_khop_hang_so_code():
     from pathlib import Path
     from controller.colab_dispatch import JOB_TIMEOUT_MIN
 
-    text = Path(".github/workflows/worker.yml").read_text(encoding="utf-8")
+    # Neo theo __file__: test này từng đọc path tương đối CWD nên chết
+    # FileNotFoundError khi pytest chạy từ thư mục khác repo root.
+    root = Path(__file__).resolve().parent.parent
+    text = (root / ".github" / "workflows" / "worker.yml").read_text(encoding="utf-8")
     pattern = r"^\s*timeout-minutes:\s*(\d+)\b"
     # Vết lỗ: pattern cũ `(\d+)\s*$` bỏ sót dòng có comment sau giá trị.
     assert re.findall(pattern, "  timeout-minutes: 75  # x\n") == ["75"]
-    found = [int(m) for m in re.findall(pattern, text, re.M)]
-    assert found, "không tìm thấy timeout-minutes nào trong workflow"
+    # Chỉ xét trong mục jobs: — `workflow_dispatch:` ở đầu file cũng khớp regex job.
+    jobs_block = text.split("\njobs:", 1)[1]
+    # Đếm theo JOB, không theo số dòng: xoá hẳn một dòng timeout-minutes thì job đó
+    # rơi về default 360' của GitHub và set(found) vẫn khớp job còn lại.
+    found = [int(m) for m in re.findall(pattern, jobs_block, re.M)]
+    jobs = re.findall(r"^  ([a-z][\w-]*):$", jobs_block, re.M)
+    assert jobs, "không tìm thấy job nào trong workflow"
+    assert len(found) == len(jobs), (
+        f"{len(jobs)} job nhưng chỉ {len(found)} dòng timeout-minutes: {jobs}")
     assert set(found) == {JOB_TIMEOUT_MIN}, f"workflow={found} != code={JOB_TIMEOUT_MIN}"
 
 
