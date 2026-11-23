@@ -609,7 +609,7 @@ async def test_upload_nhip_tim_throttle_300s(tmp_path):
     q.claim.return_value = True
     fake = tmp_path / "v.mp4"
     fake.write_bytes(b"")
-    clock = scripted_clock(1000.0, 1100.0, 1400.0)   # 100s (<300) rồi 300s (đủ)
+    clock = scripted_clock(1000.0, 1299.0, 1300.0)  # nhịp đầu, 299s (bỏ), 300s (touch)
     sent = {}
 
     async def fake_upload(cfg, path, caption, heartbeat=None):
@@ -625,14 +625,17 @@ async def test_upload_nhip_tim_throttle_300s(tmp_path):
          patch("worker.main.notify_done"), \
          patch("worker.main.notify_failed"), \
          patch("os.unlink"):
-        from worker.main import run_once
+        from worker.main import HEARTBEAT_INTERVAL_S, run_once
+        assert HEARTBEAT_INTERVAL_S == 300, (
+            "ngưỡng nhịp tim phải là 300s: sweep_stale coi job quá 15 phút không touch "
+            "là stale; nới ngưỡng làm mất biên an toàn")
         await run_once(make_cfg(dl_dir=str(tmp_path)))
         hb = sent["heartbeat"]
-        hb()                    # 1000.0 -> touch lan dau (last=0)
+        hb()                    # 1000.0 -> nhịp đầu tiên (last=0)
         q.touch.assert_called_once_with("JOB-1")
-        hb()                    # 1100.0 -> chi 100s, bo qua
+        hb()                    # 1299.0 -> 299s < 300s: bỏ qua
         assert q.touch.call_count == 1
-        hb()                    # 1400.0 -> 300s ke tu nhiem truoc, touch
+        hb()                    # 1300.0 -> đúng 300s: touch
         assert q.touch.call_count == 2
 
 

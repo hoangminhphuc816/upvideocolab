@@ -51,6 +51,10 @@ PERMANENT_SUBSTRINGS = (
     "TELETHON_SESSION không hợp lệ",
 )
 
+# Nhịp tim Sheet trong cả 2 pha. Phải < 15 phút (sweep_stale mặc định) với biên rộng:
+# một job UPLOADING bị bỏ nhịp 3 lần liên tiếp mới bị coi là stale và bị cướp.
+HEARTBEAT_INTERVAL_S = 300
+
 
 def _permanent(reason: str) -> bool:
     return any(s in reason for s in PERMANENT_SUBSTRINGS)
@@ -153,7 +157,7 @@ async def run_once(cfg: Config) -> int:
                 last_log = now
                 pct = f"{done * 100 // total}%" if total else "?"
                 log.info("download %s: %d/%s byte (%s)", job.job_id, done, total or "?", pct)
-            if now - last_touch >= 300:
+            if now - last_touch >= HEARTBEAT_INTERVAL_S:
                 last_touch = now
                 queue.touch(job.job_id)
 
@@ -192,7 +196,7 @@ async def run_once(cfg: Config) -> int:
         def upload_heartbeat() -> None:
             nonlocal last_upload_touch
             now = time.monotonic()
-            if now - last_upload_touch >= 300:
+            if now - last_upload_touch >= HEARTBEAT_INTERVAL_S:
                 last_upload_touch = now
                 queue.touch(job.job_id)
 
