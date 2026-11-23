@@ -127,7 +127,8 @@ def _stop_orphan_assignments() -> int:
         try:
             state.client.unassign(a.endpoint)
             stopped += 1
-        except Exception as e:  # best-effort: không được chặn dispatch
+        except (Exception, SystemExit) as e:  # best-effort: không được chặn dispatch
+            # colab CLI dùng sys.exit() (SystemExit) cho lỗi auth/network, không phải Exception.
             _annotate("warning", f"không unassign được {a.endpoint}: {e}")
     if stopped:
         _annotate("warning", f"đã unassign {stopped} Colab assignment mồ côi trước khi dispatch")

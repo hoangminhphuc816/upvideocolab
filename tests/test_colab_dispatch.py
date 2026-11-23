@@ -607,6 +607,39 @@ def test_stop_orphan_assignments_unassign_het_va_khong_chet(monkeypatch, capsys)
     assert "ep-dead" in out
 
 
+@pytest.mark.real_orphan_cleanup
+def test_stop_orphan_assignments_sync_auth_loi_khong_chan_dispatch(monkeypatch, capsys):
+    """colab CLI báo lỗi auth bằng sys.exit() (SystemExit) — không được làm chết dispatch."""
+    from controller.colab_dispatch import _stop_orphan_assignments
+    import colab_cli.common as colab_common
+
+    fake_state = MagicMock()
+    fake_state.sync_sessions.side_effect = SystemExit(1)
+    monkeypatch.setattr(colab_common, "state", fake_state)
+
+    assert _stop_orphan_assignments() == 0
+    assert "bỏ qua bước dọn VM mồ côi" in capsys.readouterr().out
+
+
+@pytest.mark.real_orphan_cleanup
+def test_stop_orphan_assignments_unassign_nem_systemexit_van_tiep(monkeypatch, capsys):
+    """SystemExit từ một unassign (không phải Exception) không được bỏ qua assignment sau."""
+    from controller.colab_dispatch import _stop_orphan_assignments
+    import colab_cli.common as colab_common
+
+    fake_state = MagicMock()
+    fake_state.sync_sessions.return_value = (
+        {}, [MagicMock(endpoint="ep-a"), MagicMock(endpoint="ep-b")])
+    fake_state.client.unassign.side_effect = [SystemExit(1), None]
+    monkeypatch.setattr(colab_common, "state", fake_state)
+
+    assert _stop_orphan_assignments() == 1
+    assert [c.args[0] for c in fake_state.client.unassign.call_args_list] == ["ep-a", "ep-b"]
+    out = capsys.readouterr().out
+    assert "ep-a" in out
+    assert "unassign 1" in out
+
+
 def test_dispatch_don_orphan_ngay_truoc_khi_thue_vm(tmp_path, monkeypatch):
     """Cleanup phải chạy SAU khi biết có job + quota còn, và TRUOC subprocess.run.
 
