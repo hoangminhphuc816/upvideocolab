@@ -31,6 +31,15 @@ PERMANENT_SUBSTRINGS = (
     "ffprobe",
     "PeerIdInvalid",
     "ChatWriteForbidden",
+    # Entity không resolve được: TARGET_CHANNEL sai/không phải kênh, hoặc account
+    # không còn trong kênh đó. Retry không cứu — sweep RETRY×3 chỉ đốt thêm session
+    # Colab (mỗi lượt tải lại từ đầu) rồi FAILED 'quá số lần retry'.
+    # Đã quan sát: "send_file thất bại: ValueError: Could not find the input entity
+    # for PeerUser(user_id=…) (PeerUser)" khi TARGET_CHANNEL là id dương/0 (Telethon
+    # resolve_id map id >=0 → PeerUser, kênh phải là -100…).
+    "Could not find the input entity",
+    "ChannelInvalid",
+    "ChannelPrivate",
     # Session Telegram đã chết vĩnh viễn — retry chỉ đốt thêm session Colab.
     # Phục hồi: tools/make_session.py → cập nhật secret TELETHON_SESSION (runbook §3).
     "AuthKeyDuplicated",

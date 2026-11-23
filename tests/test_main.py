@@ -342,6 +342,14 @@ def test_permanent_substrings():
     assert _permanent("ffprobe không đọc được video stream")
     assert _permanent("send_file thất bại: ... (PeerIdInvalidError)")
     assert _permanent("send_file thất bại: ... (ChatWriteForbiddenError)")
+    # Ca quan sát trên production 2026-11-23 (run 45128780540): đốt 3 session vì bị
+    # coi là tạm thời.
+    assert _permanent(
+        "send_file thất bại: ValueError: Could not find the input entity for "
+        "PeerUser(user_id=1234567890) (PeerUser). Please read https://")
+    assert _permanent("send_file thất bại: ChannelInvalidError")
+    assert _permanent("send_file thất bại: ChannelPrivateError")
+    assert not _permanent("send_file thất bại: KeyboardInterrupt")
     assert not _permanent("HTTP 429 khi tải")
     assert not _permanent("mất kết nối giữa chừng")
     assert not _permanent("không kết nối được Telegram: timeout")

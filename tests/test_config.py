@@ -46,6 +46,24 @@ def test_load_config_missing_var_fails_with_name(monkeypatch):
         load_config()
 
 
+def test_target_channel_duong_bi_chan_truoc_khi_thue_vm(monkeypatch):
+    """id dương/0 → Telethon map PeerUser → send_file chết SAU khi tải xong video.
+
+    Phải chặn ngay ở load_config để không đốt một session Colab.
+    """
+    for bad in ("1234567890", "0"):
+        _set_env(monkeypatch, TARGET_CHANNEL=bad)
+        with pytest.raises(ValueError, match="TARGET_CHANNEL"):
+            load_config()
+
+
+def test_target_channel_am_hop_le(monkeypatch):
+    """Kênh (-100…) và nhóm cũ (-123…) đều phải qua."""
+    for good in ("-1001234567890", "-123456789"):
+        _set_env(monkeypatch, TARGET_CHANNEL=good)
+        assert load_config().target_channel == int(good)
+
+
 def test_load_config_invalid_int_fails(monkeypatch):
     _set_env(monkeypatch, TELEGRAM_API_ID="khong-phai-so")
     with pytest.raises(ValueError, match="số nguyên"):
