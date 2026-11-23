@@ -393,7 +393,9 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
   `AuthKeyDuplicatedError` và session chết vĩnh viễn. `check_timeout_budget` chặn cặp
   **env/hằng** sai ngay khi controller khởi động; cặp với YAML thì `pytest`
   (`test_workflow_timeout_minutes_khop_hang_so_code`) kiểm — runtime **không** đọc
-  `.github/workflows/worker.yml`, nên sửa mỗi YAML vẫn qua được `main()` và chỉ CI bắt.
+  `.github/workflows/worker.yml`, và gate đó chạy trong CI của
+  `.github/workflows/tests.yml` (push `main` + mọi PR). Sửa `timeout-minutes` mà bỏ qua
+  gate này sẽ âm thầm khôi phục đúng sự cố ở §10d.
 - **Từ 0.8.0** `--timeout` đổi thành *idle limit* (không còn deadline tuyệt đối) —
   trước khi nâng `google-colab-cli`, đọc lại mục này.
 - **Mặc định đang dùng**: `COLAB_RUN_TIMEOUT_S=7200` (~2 giờ) — hạn tuyệt đối
@@ -405,9 +407,10 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
   (`controller/colab_dispatch.py`) và `timeout-minutes` của **cả hai** job trong
   `.github/workflows/worker.yml`. `check_timeout_budget` từ chối mọi cặp **env/hằng**
   sai (`run_timeout_s + 600 > job_timeout_min * 60`) ngay khi controller khởi động;
-  lệch YAML so với `JOB_TIMEOUT_MIN` do test
-  `test_workflow_timeout_minutes_khop_hang_so_code` bắt trong CI (đếm đủ số job, nên
-  xoá hẳn một dòng `timeout-minutes` cũng fail).
+  lệch YAML so với `JOB_TIMEOUT_MIN` chỉ được phát hiện bởi test
+  `test_workflow_timeout_minutes_khop_hang_so_code`, chạy trong CI
+  (`.github/workflows/tests.yml`) — đừng merge khi job `pytest` đỏ. Test đếm đủ số job
+  nên xoá hẳn một dòng `timeout-minutes` cũng fail.
   Chạy local: đặt biến trong `.env`/shell trước khi chạy
   `.venv/bin/python -m controller.colab_dispatch`.
   Trên GitHub Actions: đặt trong block `env:` của cả 2 job (đã có sẵn) — workflow

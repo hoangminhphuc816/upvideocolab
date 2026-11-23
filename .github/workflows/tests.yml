@@ -1,0 +1,31 @@
+name: tests
+
+# Gate cho chính các guard của pipeline: đặc biệt
+# test_workflow_timeout_minutes_khop_hang_so_code, thứ duy nhất phát hiện
+# `timeout-minutes` bị sửa lệch JOB_TIMEOUT_MIN (runtime không đọc YAML).
+# Sự cố AuthKeyDuplicatedError khởi nguồn từ đúng loại sửa đó.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      # requirements-dev kéo cả requirements.txt + requirements-colab.txt: test
+      # import colab_cli.common (state) và gspread.utils, nên phải cài đủ.
+      - name: Cài dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Chạy test (offline, không cần secret)
+        run: python -m pytest -q
