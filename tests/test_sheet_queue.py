@@ -162,6 +162,28 @@ def test_sweep_stale_retries_then_fails_and_reports():
     assert failed == ["JOB-MAX"]
 
 
+def test_sweep_don_retry_het_luot_thanh_failed():
+    """RETRY hết lượt, quá hạn ⇒ FAILED. Trước fix: nằm ngoài SWEEPABLE nên
+    không bao giờ hết hạn, không bao giờ FAILED."""
+    rows = [HDR,
+            ["JOB-1", "RETRY", "u", "42", "100", "100", "w", "", "not_found", "3", "0"]]
+    q = q_with(rows, now_ts=10_000)
+    assert q.sweep_stale(older_than_min=15, max_retries=3) == ["JOB-1"]
+    assert q.sheet.rows[1][1] == "FAILED"
+    assert q.sheet.rows[1][8] == "not_found"
+
+
+def test_sweep_retry_con_luot_bi_day_lai_thanh_pending():
+    """RETRY còn lượt mà nằm im quá hạn ⇒ trả về hàng đợi dưới dạng PENDING,
+    để đúng một vòng sweep chỉ có một job được chạy."""
+    rows = [HDR,
+            ["JOB-1", "RETRY", "u", "42", "100", "100", "w", "", "", "1", "0"]]
+    q = q_with(rows, now_ts=10_000)
+    assert q.sweep_stale(older_than_min=15, max_retries=3) == []
+    assert q.sheet.rows[1][1] == "PENDING"
+    assert q.sheet.rows[1][9] == "1"
+
+
 def test_sweep_ignores_terminal_states():
     rows = [HDR,
             ["JOB-D", "DONE", "u1", "42", "1", "1", "w", "9", "", "0", "0"],
@@ -397,3 +419,21 @@ def test_job_cache_not_stale_after_row_insert():
     assert job2[1] == "DOWNLOADING"
     job1 = [r for r in q.sheet.rows if r[0] == "JOB-1"][0]
     assert job1[1] == "PENDING"  # stale index would have overwritten JOB-1
+
+
+def test_next_job_bo_qua_retry_da_het_luot():
+    """Job RETRY hết lượt không được dispatch nữa — nếu không, nó thắng job mới
+    mỗi vòng sweep và thuê VM vô hạn (34 ngày trong sự cố thật)."""
+    rows = [HDR,
+            ["JOB-CU",  "RETRY",   "u1", "42", "100", "200", "w", "", "", "3", "0"],
+            ["JOB-MOI", "PENDING", "u2", "42", "999", "",    "", "", "",  "0", "0"]]
+    q = q_with(rows, now_ts=10_000)
+    assert q.next_job().job_id == "JOB-MOI"
+
+
+def test_next_job_van_tra_retry_con_luot():
+    rows = [HDR,
+            ["JOB-1", "RETRY", "u1", "42", "100", "200", "w", "", "", "2", "0"],
+            ["JOB-2", "PENDING", "u2", "42", "999", "",    "", "", "",  "0", "0"]]
+    q = q_with(rows, now_ts=10_000)
+    assert q.next_job().job_id == "JOB-1"   # RETRY còn lượt vẫn ưu tiên

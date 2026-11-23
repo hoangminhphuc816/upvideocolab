@@ -24,7 +24,8 @@ COLUMNS = ["job_id", "status", "url", "chat_id", "created_at", "updated_at",
            "media_key", "url_alt"]
 STATUSES = ["PENDING", "WAITING", "CLAIMED", "DOWNLOADING", "UPLOADING",
             "DONE", "FAILED", "RETRY"]
-SWEEPABLE = ("CLAIMED", "DOWNLOADING", "UPLOADING")  # PENDING = chưa từng thử ⇒ không phải stale
+SWEEPABLE = ("CLAIMED", "DOWNLOADING", "UPLOADING", "RETRY")  # PENDING = chưa từng thử ⇒ không phải stale
+MAX_RETRIES = 3  # dùng chung cho sweep_stale() và next_job()
 
 
 @dataclass
@@ -92,7 +93,12 @@ class SheetQueue:
         return job_id
 
     def next_job(self) -> Job | None:
-        """RETRY ưu tiên trước PENDING; cùng mức ưu tiên thì created_at nhỏ nhất."""
+        """RETRY ưu tiên trước PENDING; cùng mức ưu tiên thì created_at nhỏ nhất.
+
+        Bỏ qua RETRY đã hết lượt (`retry_count >= MAX_RETRIES`): nếu không, nó
+        luôn thắng PENDING mới và bị dispatch lại mỗi vòng sweep — thuê VM, tải
+        lại toàn bộ video, fail, lặp vô hạn (sự cố 34 ngày, 2026-11-23).
+        """
         self._invalidate_job_cache()
         candidates: list[tuple[int, int, int, list[str]]] = []
         for i, row in enumerate(self.sheet.get_all_values(), start=1):
@@ -100,6 +106,11 @@ class SheetQueue:
                 continue
             status = row[self._col["status"] - 1]
             if status == "RETRY":
+                if self._to_int(row[self._col["retry_count"] - 1]) >= MAX_RETRIES:
+                    # Hết lượt ⇒ không dispatch nữa (chặn vòng lặp thuê VM).
+                    # Việc chuyển sang FAILED thuộc sweep_stale — hiện CHƯA làm,
+                    # và ở trạng thái này job sẽ kẹt im lặng, không notify.
+                    continue
                 priority = 0
             elif status == "PENDING":
                 priority = 1
@@ -251,7 +262,7 @@ class SheetQueue:
                 n += 1
         return n
 
-    def sweep_stale(self, older_than_min: int = 15, max_retries: int = 3) -> list[str]:
+    def sweep_stale(self, older_than_min: int = 15, max_retries: int = MAX_RETRIES) -> list[str]:
         """Job đang in-flight (CLAIMED/DOWNLOADING/UPLOADING) quá cũ → RETRY.
 
         PENDING không bị sweep: chưa từng thử ⇒ không tính là stale.
@@ -274,8 +285,12 @@ class SheetQueue:
                 continue  # còn mới
             retries = self._to_int(row[self._col["retry_count"] - 1])
             if retries >= max_retries:
-                self._set_status_at_row(i, "FAILED", error="quá số lần retry")
+                current_error = row[self._col["error"] - 1]
+                self._set_status_at_row(
+                    i, "FAILED", error=current_error or "quá số lần retry")
                 newly_failed.append(job_id)
+            elif status == "RETRY":
+                self._set_status_at_row(i, "PENDING")
             else:
                 self._set_status_at_row(i, "RETRY")
                 self.sheet.update_cell(i, self._col["retry_count"], str(retries + 1))
