@@ -137,8 +137,10 @@ def test_dispatch_peeks_then_runs_colab(tmp_path, monkeypatch):
     assert not history.exists()
 
 
-def test_dispatch_job_permanent_failure_is_green(tmp_path, monkeypatch, capsys):
-    """exit 2 + Sheet=FAILED (worker đã claim) → CI xanh + annotation warning."""
+def test_dispatch_job_permanent_failure_is_red(tmp_path, monkeypatch, capsys):
+    """exit 2 + Sheet=FAILED (worker đã claim) → CI đỏ + annotation error.
+
+    Job lỗi vĩnh viễn phải làm run đỏ, không phải xanh-im-lặng."""
     monkeypatch.setenv("WORKER_REPO", "owner/repo")
     monkeypatch.setenv("WORKER_ID", "override-worker")
     q = MagicMock()
@@ -151,9 +153,9 @@ def test_dispatch_job_permanent_failure_is_green(tmp_path, monkeypatch, capsys):
          patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"), \
          patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
-    assert rc == 0
+    assert rc == 1
     out = capsys.readouterr().out
-    assert "::warning::JOB-1" in out
+    assert "::error::JOB-1" in out
     assert "HTTP 403" in out
 
 
@@ -573,6 +575,14 @@ def test_main_missing_env_raises_value_error(monkeypatch, tmp_path):
         except ValueError as e:
             for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "GCP_SA_JSON", "COLAB_TOKEN_JSON"]:
                 assert key in str(e), f"{key} missing from ValueError message: {e}"
+
+
+def test_classify_run_failed_that_thi_do(capsys):
+    """Job FAILED thật phải làm run đỏ, không phải warning xanh."""
+    job = Job("JOB-1", "FAILED", "u", 42, 100, 200, "w", None, "boom", 0, "0", 2)
+    q = MagicMock(); q.get_job.return_value = job
+    assert _classify_run(q, "JOB-1", "w", 2) == 1
+    assert "::error::" in capsys.readouterr().out
 
 
 def test_classify_run_auth_key_chet_thi_do_va_chi_cach_sua(capsys):

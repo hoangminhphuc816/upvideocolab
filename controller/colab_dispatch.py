@@ -5,10 +5,12 @@ Exit-code semantics:
   worker.main) VÀ dùng non-zero cho lỗi của chính CLI ⇒ exit code một mình
   không phân biệt được "job lỗi" với "đường dispatch hỏng".
 - Vì vậy sau khi CLI kết thúc, controller đọc lại dòng job trên Sheet (nguồn
-  sự thật) rồi mới quyết định: chỉ trả non-zero khi worker của LƯỢT NÀY
-  không claim được job (dispatch thật sự hỏng). Job lỗi vĩnh viễn / VM dừng
-  giữa chừng đã được worker ghi Sheet + notify owner ⇒ CI xanh kèm annotation
-  `::warning::`.
+  sự thật) rồi mới quyết định: trả non-zero khi worker của LƯỢT NÀY không claim
+  được job (dispatch thật sự hỏng), HOẶC khi job kết thúc ở trạng thái FAILED
+  (lỗi vĩnh viễn — retry không cứu, owner đã được notify qua Telegram).
+  Trong các kết cục job-level, chỉ `FAILED` mới đỏ; `DONE`, "VM dừng giữa
+  chừng", và status lạ vẫn xanh kèm `::warning::`. (Đường dispatch hỏng vẫn đỏ
+  riêng, như đoạn trên.)
 """
 from __future__ import annotations
 
@@ -140,9 +142,10 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
 
     - worker của lượt này không claim được job (cột `worker` khác `worker_id`)
       ⇒ không có gì chạy ⇒ đỏ.
-    - worker của lượt này đã claim ⇒ job-level: DONE/FAILED (đã ghi Sheet +
-      notify) hoặc dở dang (sweep sẽ RETRY sau ≤15 phút) ⇒ xanh +
-      `::warning::`.
+    - worker của lượt này đã claim ⇒ job-level:
+        * FAILED  → đỏ + `::error::` (lỗi vĩnh viễn, retry không cứu)
+        * DONE    → xanh + `::warning::`
+        * dở dang → xanh + `::warning::` (sweep sẽ RETRY sau ≤15 phút)
     """
     if returncode == 0:
         return 0
@@ -160,10 +163,14 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
                            f"Retry vô ích — chạy tools/make_session.py, cập nhật secret "
                            f"TELETHON_SESSION (runbook §3), rồi dispatch lại.")
         return 1
-    if job.status in ("DONE", "FAILED"):
+    if job.status == "FAILED":
+        detail = f" ({job.error})" if job.error else ""
+        _annotate("error", f"{job_id}: job FAILED{detail}")
+        return 1
+    if job.status == "DONE":
         detail = f" ({job.error})" if job.error else ""
         _annotate("warning", f"{job_id}: worker kết thúc exit {returncode}, "
-                             f"Sheet={job.status}{detail}")
+                             f"Sheet=DONE{detail}")
         return 0
     if job.status not in STATUSES:
         _annotate("warning", f"{job_id}: colab run exit {returncode}, "

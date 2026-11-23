@@ -173,9 +173,11 @@ xoá 2 Script Property này sau khi deploy GAS mới (tuỳ chọn).
    - **Đỏ = dispatch hỏng thật**: worker của lượt này không claim được job
      (Sheet vẫn PENDING/RETRY, cột `worker` khác `WORKER_ID`) → job không
      chạy, cần xem log + annotation `::error::` của run.
-   - **Xanh kèm `::warning::` = job lỗi ở tầng job** (Sheet FAILED, hoặc VM
-     dừng giữa chừng để sweep RETRY). Chi tiết lỗi nằm ở cột `error` trên
-     Sheet + tin `[FAIL]` Telegram — không phải trên GitHub.
+   - **Đỏ + `::error::` … job FAILED**: job chết ở tầng job (lỗi vĩnh viễn —
+     retry không cứu được). Chi tiết ở cột `error` trên Sheet + tin `[FAIL]`
+     Telegram. Không phải dispatch hỏng.
+   - **Xanh kèm `::warning::`**: job kết thúc DONE, hoặc VM dừng giữa chừng
+     (sweep sẽ RETRY). Không cần xử lý tay.
 6. Lưu ý pipeline secrets: các secret chỉ tồn tại trong môi trường runner
    ~30 giây, sau đó controller bootstrap truyền env xuống VM qua prelude
    `os.environ` trong `colab_bootstrap.py` (session ephemeral, tự teardown).

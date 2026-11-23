@@ -182,8 +182,29 @@ def test_run_sweep_notifies_newly_failed():
          patch("worker.main.notify_failed") as nf:
         from worker.main import run_sweep
         rc = run_sweep(make_cfg())
-    assert rc == 0
+    assert rc == 1
     nf.assert_called_once()
+
+
+def test_run_sweep_do_khi_vua_failed_job(capsys):
+    from worker.main import run_sweep
+    q = MagicMock()
+    q.sweep_stale.return_value = ["JOB-1"]
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main._try_notify_failed"):
+        assert run_sweep(make_cfg()) == 1
+    out = capsys.readouterr().out
+    assert "::error::" in out and "JOB-1" in out
+
+
+def test_run_sweep_xanh_khi_khong_co_gi():
+    from worker.main import run_sweep
+    q = MagicMock()
+    q.sweep_stale.return_value = []
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main._try_notify_failed") as nf:
+        assert run_sweep(make_cfg()) == 0
+    nf.assert_not_called()
 
 
 @pytest.fixture(autouse=True)

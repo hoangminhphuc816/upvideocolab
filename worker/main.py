@@ -246,7 +246,13 @@ def run_sweep(cfg: Config) -> int:
     newly_failed = queue.sweep_stale()
     for job_id in newly_failed:
         _try_notify_failed(cfg, job_id, "quá số lần retry")
-    log.info("sweep xong, %d job chuyển FAILED", len(newly_failed))
+    if newly_failed:
+        print(f"::error::{len(newly_failed)} job chuyển FAILED: "
+              f"{', '.join(newly_failed)} — xem cột error trên Sheet", flush=True)
+        log.error("sweep xong, %d job chuyển FAILED: %s",
+                  len(newly_failed), ", ".join(newly_failed))
+        return 1
+    log.info("sweep xong, không có job nào chuyển FAILED")
     return 0
 
 
