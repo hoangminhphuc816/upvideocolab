@@ -62,9 +62,25 @@ async def upload_to_channel(cfg: Config, path: str, caption: str,
         raise UploadError(f"không kết nối được Telegram: {type(e).__name__}: {e}") from None
 
     try:
-        await client.get_dialogs()  # warm entity cache (các dialog của account)
+        # limit=None (mặc định) nạp hết dialog; đây là warm cache best-effort.
+        await client.get_dialogs()
     except Exception:
-        pass  # cache warm fail không chặn — send_file sẽ tự resolve
+        # KHÔNG được nuốt: chính lỗi ở bước này là thứ khiến send_file sau đó
+        # chết với "Could not find the input entity" mà log không có dấu vết.
+        log.exception("warm entity cache lỗi (vẫn thử get_entity trực tiếp)")
+
+    # Gọi tường minh: get_dialogs ở trên có thể đã fail, khi đó cache rỗng và
+    # send_file(-100…) gửi InputChannel(access_hash=0) ⇒ ChannelInvalidError ⇒
+    # ValueError khó hiểu. Resolve ở đây để lỗi nêu đích danh TARGET_CHANNEL.
+    try:
+        channel = await client.get_entity(cfg.target_channel)
+    except Exception as e:
+        await _safe_disconnect(client)
+        raise UploadError(
+            f"TARGET_CHANNEL không truy cập được ({cfg.target_channel}): "
+            f"{type(e).__name__}: {e}"
+        ) from None
+
     last = -1
 
     def progress(sent: int, total: int) -> None:
@@ -103,7 +119,7 @@ async def upload_to_channel(cfg: Config, path: str, caption: str,
 
     try:
         msg = await client.send_file(
-            cfg.target_channel,
+            channel,
             path,
             caption=caption[:1024],
             supports_streaming=True,
