@@ -34,11 +34,27 @@ HISTORY_DIR = Path.home() / ".config" / "colab-cli" / "history"
 # dài không giữ VM idle. Đổi bằng env COLAB_RUN_TIMEOUT_S.
 COLAB_RUN_TIMEOUT_S = os.environ.get("COLAB_RUN_TIMEOUT_S", "7200")
 
+# `timeout-minutes` của job trong .github/workflows/worker.yml phải LỚN HƠN hạn cell
+# cộng biên teardown: runner cancel = CLI không kịp teardown = VM bị bỏ rơi = 2 IP cùng
+# auth key (AuthKeyDuplicatedError). Đổi 1 trong 2 số phải đổi cả cặp.
+JOB_TIMEOUT_MIN = 140
+TEARDOWN_MARGIN_S = 600
+
+
+def check_timeout_budget(run_timeout_s: int, job_timeout_min: int) -> None:
+    if run_timeout_s + TEARDOWN_MARGIN_S > job_timeout_min * 60:
+        raise ValueError(
+            f"ngân sách thời gian không an toàn: colab run --timeout={run_timeout_s}s + "
+            f"biên {TEARDOWN_MARGIN_S}s > timeout-minutes={job_timeout_min} phút. "
+            f"Runner sẽ cancel giữa cell và bỏ rơi VM (AuthKeyDuplicatedError). "
+            f"Sửa .github/workflows/worker.yml hoặc COLAB_RUN_TIMEOUT_S."
+        )
+
 TZ_VN = "Asia/Ho_Chi_Minh"  # UTC+7, không có DST
 DAILY_UPLOAD_LIMIT = int(os.environ.get("DAILY_UPLOAD_LIMIT", "4"))
 # Retry chỉ khi VM CHƯA claim job (cột worker != worker_id). Assign timeout của
 # google-auth là 120s/lần; 3 lần + backoff 20/40s đủ vượt spike mà không đốt
-# timeout-minutes 75 của job. Không retry sau khi worker đã claim: tránh 2 VM cùng
+# hạn job (JOB_TIMEOUT_MIN). Không retry sau khi worker đã claim: tránh 2 VM cùng
 # xử lý một job.
 DISPATCH_ATTEMPTS = 3
 DISPATCH_BACKOFF_S = 20
@@ -264,6 +280,7 @@ def main() -> int:
                if not os.environ.get(k)]
     if missing:
         raise ValueError(f"thiếu biến môi trường bắt buộc: {', '.join(sorted(missing))}")
+    check_timeout_budget(int(COLAB_RUN_TIMEOUT_S), JOB_TIMEOUT_MIN)
     cfg = Config(
         telethon_session=os.environ["TELETHON_SESSION"],
         api_id=int(os.environ["TELEGRAM_API_ID"]),

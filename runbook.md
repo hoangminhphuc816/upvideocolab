@@ -385,17 +385,27 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
 
 ## 10d. Chính sách ngân sách thời gian Colab
 
+- **Ràng buộc bắt buộc**: `timeout-minutes` của job Actions > `COLAB_RUN_TIMEOUT_S`/60
+  + 10 phút (hiện `140` > `120 + 10`). Job bị runner cancel thì `colab run` **không**
+  chạy được `finally` teardown (không có signal handler trong CLI 0.6.0) ⇒ VM + kernel
+  remote tiếp tục chạy cell ⇒ nếu VM khác claim cùng job thì 2 IP dùng chung auth key ⇒
+  `AuthKeyDuplicatedError` và session chết vĩnh viễn. `check_timeout_budget` chặn cặp
+  số sai ngay khi controller khởi động.
+- **Từ 0.8.0** `--timeout` đổi thành *idle limit* (không còn deadline tuyệt đối) —
+  trước khi nâng `google-colab-cli`, đọc lại mục này.
 - **Mặc định đang dùng**: `COLAB_RUN_TIMEOUT_S=7200` (~2 giờ) — hạn tuyệt đối
   của `colab run --timeout` cho cả cell (jupyter_kernel_client tính deadline một
   lần; log không reset nó).
 - **Tại sao không dài hơn vô hạn**: mục tiêu là job thường xuyên hoàn thành
   trong hạn; chính sách giữ session ngắn để giảm rủi ro anti-abuse.
-- **Cách đổi**: chỉ đổi env `COLAB_RUN_TIMEOUT_S`; **không sửa code**.
+- **Cách đổi**: đổi **cả cặp** — env `COLAB_RUN_TIMEOUT_S`, hằng `JOB_TIMEOUT_MIN`
+  (`controller/colab_dispatch.py`) và `timeout-minutes` của **cả hai** job trong
+  `.github/workflows/worker.yml`. `check_timeout_budget` từ chối mọi cặp sai
+  (`run_timeout_s + 600 > job_timeout_min * 60`) ngay khi controller khởi động.
   Chạy local: đặt biến trong `.env`/shell trước khi chạy
   `.venv/bin/python -m controller.colab_dispatch`.
-  Trên GitHub Actions: thêm 1 dòng vào block `env:` của job `worker` (và `sweep`
-  nếu muốn) trong `.github/workflows/worker.yml`, ví dụ `COLAB_RUN_TIMEOUT_S: "7200"`
-  — workflow lấy env từ block này, không đọc `.env`.
+  Trên GitHub Actions: đặt trong block `env:` của cả 2 job (đã có sẵn) — workflow
+  không đọc `.env`.
 - **Residual**: job quá lớn không xong trong hạn vẫn sẽ tốn tối đa **4 session**
   Colab rồi FAILED (1 lượt đầu + 3 retry, `max_retries=3`). Nếu gặp thường xuyên: cân nhắc giảm
   chất lượng đầu vào, cắt video nhỏ hơn, hoặc chốt nguồn URL thân thiện

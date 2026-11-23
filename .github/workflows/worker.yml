@@ -25,9 +25,10 @@ jobs:
   worker:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'worker'
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 140
     env:
       WORKER_REPO: ${{ vars.WORKER_REPO }}
+      COLAB_RUN_TIMEOUT_S: "7200"
       COLAB_TOKEN_JSON: ${{ secrets.COLAB_TOKEN_JSON }}
       GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
       SHEET_ID: ${{ secrets.SHEET_ID }}
@@ -52,9 +53,10 @@ jobs:
   sweep:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'sweep'
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 140
     env:
       WORKER_REPO: ${{ vars.WORKER_REPO }}
+      COLAB_RUN_TIMEOUT_S: "7200"
       COLAB_TOKEN_JSON: ${{ secrets.COLAB_TOKEN_JSON }}
       GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
       SHEET_ID: ${{ secrets.SHEET_ID }}

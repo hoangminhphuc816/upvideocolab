@@ -405,6 +405,30 @@ def test_dispatch_retries_preclaim_failure_then_succeeds(tmp_path, monkeypatch, 
     assert "thử lại sau 20s" in capsys.readouterr().out
 
 
+def test_check_timeout_budget_tu_choi_cau_hinh_ro_ri_vm():
+    from controller.colab_dispatch import check_timeout_budget
+    check_timeout_budget(7200, 140)
+    with pytest.raises(ValueError, match="timeout-minutes"):
+        check_timeout_budget(7200, 75)
+    with pytest.raises(ValueError, match="timeout-minutes"):
+        check_timeout_budget(9000, 140)
+
+
+def test_workflow_timeout_minutes_khop_hang_so_code():
+    """timeout-minutes của MỌI job phải == JOB_TIMEOUT_MIN; lệch ⇒ guard vô nghĩa."""
+    import re
+    from pathlib import Path
+    from controller.colab_dispatch import JOB_TIMEOUT_MIN
+
+    text = Path(".github/workflows/worker.yml").read_text(encoding="utf-8")
+    pattern = r"^\s*timeout-minutes:\s*(\d+)\b"
+    # Vết lỗ: pattern cũ `(\d+)\s*$` bỏ sót dòng có comment sau giá trị.
+    assert re.findall(pattern, "  timeout-minutes: 75  # x\n") == ["75"]
+    found = [int(m) for m in re.findall(pattern, text, re.M)]
+    assert found, "không tìm thấy timeout-minutes nào trong workflow"
+    assert set(found) == {JOB_TIMEOUT_MIN}, f"workflow={found} != code={JOB_TIMEOUT_MIN}"
+
+
 def test_dispatch_khong_retry_khi_worker_da_claim(tmp_path, monkeypatch, capsys):
     q, history = _retry_fixture(tmp_path, monkeypatch)
     q.get_job.return_value = MagicMock(status="DOWNLOADING", worker="override-worker", error="")
