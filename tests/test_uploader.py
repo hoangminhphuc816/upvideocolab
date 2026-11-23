@@ -1,6 +1,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import binascii
 import pytest
+import struct
 
 from worker.config import Config
 from worker.uploader import upload_to_channel, UploadError
@@ -173,3 +175,22 @@ async def test_upload_heartbeat_loi_khong_abort_upload():
          patch("worker.uploader.extract_thumbnail", return_value=None):
         mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1", heartbeat=boom)
     assert mid == 901
+
+
+@pytest.mark.asyncio
+async def test_upload_session_hong_bao_loi_ro_rang():
+    """Secret cắt cụt/sai/base64 lỗi/ASCII lạ → UploadError message ổn định,
+    TelegramClient không được khởi tạo."""
+    for err in [
+        ValueError("Not a valid string"),
+        binascii.Error("Incorrect padding"),
+        binascii.Error("Invalid base64-encoded string: number of data characters (N) cannot be 1 more than a multiple of 4"),
+        struct.error("unpack requires a buffer of 275 bytes"),
+        ValueError("string argument should contain only ASCII characters"),
+    ]:
+        with patch("worker.uploader.StringSession", side_effect=err) as ss, \
+             patch("worker.uploader.TelegramClient") as tc:
+            with pytest.raises(UploadError, match="TELETHON_SESSION không hợp lệ"):
+                await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+        ss.assert_called_once_with("sess")
+        tc.assert_not_called()

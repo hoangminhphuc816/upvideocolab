@@ -670,3 +670,22 @@ async def test_run_once_khong_upload_khi_mat_quyen(tmp_path):
     assert rc == 0
     up.assert_not_called()
     assert "UPLOADING" not in statuses_written(q)   # không ai được thấy job 'đang upload'
+
+
+def test_permanent_nhan_loi_auth_key_chet_vinh_vien():
+    from worker.main import _permanent
+    for reason in [
+        "không kết nối được Telegram: AuthKeyDuplicatedError: The authorization key ...",
+        "không kết nối được Telegram: AuthKeyUnregisteredError: The key is not registered",
+        "không kết nối được Telegram: AuthKeyInvalidError: The key is invalid",
+        "không kết nối được Telegram: SessionRevokedError: ...terminating all sessions",
+        "không kết nối được Telegram: UserDeactivatedError: ...",
+        "không tạo được TelegramClient: ValueError: Not a valid string",
+        "không tạo được TelegramClient: binascii.Error: Incorrect padding",
+        "không tạo được TelegramClient: struct.error: unpack requires a buffer of 275 bytes",
+        "không kết nối được Telegram: ApiIdInvalidError: The api_id/api_hash combination is invalid",
+        "TELETHON_SESSION không hợp lệ: ValueError: Not a valid string",
+        "TELETHON_SESSION không hợp lệ: binascii.Error: Invalid base64-encoded string: number of data characters (N) cannot be 1 more than a multiple of 4",
+        "TELETHON_SESSION không hợp lệ: ValueError: string argument should contain only ASCII characters",
+    ]:
+        assert _permanent(reason), reason

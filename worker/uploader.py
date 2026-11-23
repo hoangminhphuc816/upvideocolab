@@ -29,8 +29,17 @@ async def _safe_disconnect(client: TelegramClient) -> None:
 async def upload_to_channel(cfg: Config, path: str, caption: str,
                             heartbeat=None) -> int:
     try:
+        session = StringSession(cfg.telethon_session)
+    except Exception as e:
+        # Secret bị cắt cụt/sai/ký tự lạ: Telethon raise nhiều lớp khác nhau
+        # (binascii.Incorrect padding, Invalid base64-encoded string, struct.error,
+        # ValueError non-ASCII). Chuẩn hoá về 1 câu ổn định để phân loại vĩnh viễn.
+        raise UploadError(
+            f"TELETHON_SESSION không hợp lệ: {type(e).__name__}: {e}"
+        ) from None
+    try:
         client = TelegramClient(
-            StringSession(cfg.telethon_session),
+            session,
             cfg.api_id,
             cfg.api_hash,
             # Giả lập client Telegram Desktop chính thức — fingerprint ổn định,

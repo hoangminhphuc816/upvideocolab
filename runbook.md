@@ -60,9 +60,11 @@ Worker đã cấu hình sẵn các điểm có kiểm soát:
   `lang_code="en"`) — tránh fingerprint Telethon mặc định
   ("PC 64bit"/kernel-release/"1.45.0") dễ bị nhận diện client không chính thống.
   Đã pin trong test (`test_uploader.py`).
-- **Session chạy đúng 1 nơi**: concurrency group `video-worker` đảm bảo không
-  bao giờ 2 client cùng session đồng thời. KHÔNG chạy worker local song song
-  với Actions (`AuthKeyDuplicatedError`).
+- **Session chạy đúng 1 nơi**: concurrency group `video-worker` serialize các
+  *run*, nhưng KHÔNG thu hồi VM bị bỏ rơi (runner cancel ở `timeout-minutes`
+  → CLI không kịp teardown). Hàng rào kỹ thuật thật: fencing theo cột `worker`
+  + nhịp tim Sheet trong pha upload (`worker/main.py`). KHÔNG chạy worker local
+  song song với Actions.
 - **Disconnect đúng cách**: worker luôn `await client.disconnect()` trong
   `finally` (kể cả khi lỗi).
 - **Không làm trên app Telegram khi session đang sống**: đổi mật khẩu /
@@ -302,7 +304,7 @@ python -m controller.colab_dispatch
 | --- | --- |
 | Actions run không xuất hiện sau /dl | Đúng thiết kế: tin nhắn chỉ xếp hàng, chờ sweep 2h kế tiếp. Nếu quá 2h vẫn không có run: kiểm tra cron-job.org và đã deploy GAS mới chưa |
 | Run đỏ: `colab run exit 1`, log có `ReadTimeout ... colab.research.google.com ... read timeout=120` | Colab assign chậm/quá tải (timeout 120s mặc định của google-auth). Controller thử tối đa 3 lần (cách 20s/40s) khi VM **chưa** claim job. Hết lượt mà vẫn lỗi: run đỏ nhưng job vẫn `PENDING`, sweep 2h sau thử tiếp — không mất job, không cần sửa tay |
-| `AuthKeyDuplicatedError` Telethon | 1 session dùng 2 nơi — chắc chắn không chạy worker local song song với Actions |
+| `AuthKeyDuplicatedError` Telethon | Session dùng ở 2 IP **đồng thời** — auth key chết vĩnh viễn (`can no longer be used`), retry không cứu. Nguyên nhân đã biết: (a) sweep cướp job vì upload không có nhịp tim, (b) runner cancel ở `timeout-minutes` bỏ rơi VM đang upload. Xử lý: `tools/make_session.py` → update secret `TELETHON_SESSION` → kết thúc phiên cũ trong Telegram → dispatch lại. Phòng ngừa: runbook §3a + plan `docs/superpowers/plans/2026-11-22-authkey-duplicated-fencing.md` |
 | `FloodWaitError` | Worker đã set flood_sleep_threshold=120; nếu vẫn chờ lâu hơn, để job treo → sweep RETRY |
 | Sheet `PERMISSION_DENIED` | SA chưa được Share Editor Sheet |
 | Video không stream được trong kênh | ffprobe chặn file không có video stream; codec lạ (vd HEVC/mkv) vẫn qua ffprobe nhưng kênh có thể không stream được |

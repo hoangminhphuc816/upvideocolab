@@ -62,6 +62,13 @@ _REQUIRED_ENV_KEYS = (
     "BOT_TOKEN",
 )
 
+# Lỗi session Telegram vĩnh viễn + cấu hình sai: retry không cứu được, cần sửa tay.
+AUTH_KEY_MARKERS = ("AuthKeyDuplicated", "AuthKeyUnregistered", "AuthKeyInvalid",
+                    "SessionRevoked", "UserDeactivated",
+                    "Not a valid string", "Incorrect padding",
+                    "unpack requires a buffer", "ApiIdInvalid",
+                    "TELETHON_SESSION không hợp lệ")
+
 
 def _materialize_token(colab_token_json: str) -> None:
     TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -97,6 +104,11 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
         _annotate("error", f"{job_id}: colab run exit {returncode}, Sheet={job.status}, "
                             f"worker={job.worker} != {worker_id} — dispatch thất bại; "
                             f"job vẫn PENDING/RETRY, sweep sau sẽ thử lại")
+        return 1
+    if job.error and any(m in job.error for m in AUTH_KEY_MARKERS):
+        _annotate("error", f"{job_id}: session Telegram đã chết ({job.error[:180]}). "
+                           f"Retry vô ích — chạy tools/make_session.py, cập nhật secret "
+                           f"TELETHON_SESSION (runbook §3), rồi dispatch lại.")
         return 1
     if job.status in ("DONE", "FAILED"):
         detail = f" ({job.error})" if job.error else ""

@@ -493,3 +493,36 @@ def test_main_missing_env_raises_value_error(monkeypatch):
     except ValueError as e:
         for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "GCP_SA_JSON", "COLAB_TOKEN_JSON"]:
             assert key in str(e), f"{key} missing from ValueError message: {e}"
+
+
+def test_classify_run_auth_key_chet_thi_do_va_chi_cach_sua(capsys):
+    """FAILED do auth key chết không phải chuyện tự lành: CI phải ĐỎ + chỉ runbook."""
+    job = Job("JOB-1", "FAILED", "u", 42, 100, 200, "colab-run1", None,
+              "không kết nối được Telegram: AuthKeyDuplicatedError: ...", 0, "0", 2)
+    q = MagicMock()
+    q.get_job.return_value = job
+    assert _classify_run(q, "JOB-1", "colab-run1", 2) == 1
+    out = capsys.readouterr().out
+    assert "::error::JOB-1" in out
+    assert "AuthKeyDuplicated" in out
+    assert "make_session.py" in out
+
+
+def test_classify_run_bi_cat_session_bi_cut_cuc_van_do(capsys):
+    """Secret bị cắt cụt/ sai padding / struct short đều cần sửa tay, không retry được."""
+    for error in [
+        "không tạo được TelegramClient: binascii.Error: Incorrect padding",
+        "không tạo được TelegramClient: struct.error: unpack requires a buffer of 275 bytes",
+        "không tạo được TelegramClient: ValueError: Not a valid string",
+        "không kết nối được Telegram: ApiIdInvalidError: ...",
+        "TELETHON_SESSION không hợp lệ: binascii.Error: Invalid base64-encoded string: number of data characters (N) cannot be 1 more than a multiple of 4",
+        "TELETHON_SESSION không hợp lệ: ValueError: string argument should contain only ASCII characters",
+    ]:
+        job = Job("JOB-1", "FAILED", "u", 42, 100, 200, "colab-run1", None,
+                  error, 0, "0", 2)
+        q = MagicMock()
+        q.get_job.return_value = job
+        assert _classify_run(q, "JOB-1", "colab-run1", 2) == 1, error
+        out = capsys.readouterr().out
+        assert "::error::JOB-1" in out
+        assert "make_session.py" in out

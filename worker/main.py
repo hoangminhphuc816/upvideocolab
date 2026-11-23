@@ -31,6 +31,24 @@ PERMANENT_SUBSTRINGS = (
     "ffprobe",
     "PeerIdInvalid",
     "ChatWriteForbidden",
+    # Session Telegram đã chết vĩnh viễn — retry chỉ đốt thêm session Colab.
+    # Phục hồi: tools/make_session.py → cập nhật secret TELETHON_SESSION (runbook §3).
+    "AuthKeyDuplicated",
+    "AuthKeyUnregistered",
+    "AuthKeyInvalid",
+    "SessionRevoked",
+    "UserDeactivated",
+    # Cấu hình sai cũng vĩnh viễn: retry không cứu được, phải re-mint secret hoặc sửa api.
+    # - "Not a valid string": byte version đầu Sai / secret hoàn toàn sai (StringSession ValueError).
+    # - "Incorrect padding": secret bị cắt cụt giữa chừng (binascii.Error).
+    # - "unpack requires a buffer": secret ngắn nhưng vẫn khớp padding (struct.error).
+    # - "ApiIdInvalid": api_id/api_hash sai.
+    "Not a valid string",
+    "Incorrect padding",
+    "unpack requires a buffer",
+    "ApiIdInvalid",
+    # Marker ổn định từ uploader.py khi StringSession raise mọi lớp lỗi cắt cụt/padding/struct/ASCII.
+    "TELETHON_SESSION không hợp lệ",
 )
 
 
