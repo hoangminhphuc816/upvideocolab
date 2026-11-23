@@ -186,6 +186,30 @@ def test_run_sweep_notifies_newly_failed():
     nf.assert_called_once()
 
 
+def test_run_sweep_notifies_reason_from_sheet_error():
+    q = MagicMock()
+    q.sweep_stale.return_value = ["JOB-1"]
+    q.get_job.return_value = MagicMock(error="Could not find the input entity")
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.notify_failed") as nf:
+        from worker.main import run_sweep
+        run_sweep(make_cfg())
+    nf.assert_called_once_with(make_cfg(), "JOB-1", "Could not find the input entity")
+
+
+def test_run_sweep_notify_quota_error_keeps_default_reason():
+    q = MagicMock()
+    q.sweep_stale.return_value = ["JOB-1", "JOB-2"]
+    q.get_job.side_effect = RuntimeError("quota")
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.notify_failed") as nf:
+        from worker.main import run_sweep
+        run_sweep(make_cfg())
+    assert nf.call_count == 2
+    nf.assert_any_call(make_cfg(), "JOB-1", "quá số lần retry")
+    nf.assert_any_call(make_cfg(), "JOB-2", "quá số lần retry")
+
+
 def test_run_sweep_do_khi_vua_failed_job(capsys):
     from worker.main import run_sweep
     q = MagicMock()

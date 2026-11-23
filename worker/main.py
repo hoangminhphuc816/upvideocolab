@@ -245,7 +245,15 @@ def run_sweep(cfg: Config) -> int:
     queue = SheetQueue(cfg)
     newly_failed = queue.sweep_stale()
     for job_id in newly_failed:
-        _try_notify_failed(cfg, job_id, "quá số lần retry")
+        reason = "quá số lần retry"
+        try:
+            job = queue.get_job(job_id)
+        except Exception:  # best-effort: notify phải chạy kể cả khi đọc Sheet lỗi
+            log.exception("không đọc được dòng %s để lấy lý do", job_id)
+        else:
+            if job and job.error:
+                reason = job.error
+        _try_notify_failed(cfg, job_id, reason)
     if newly_failed:
         print(f"::error::{len(newly_failed)} job chuyển FAILED: "
               f"{', '.join(newly_failed)} — xem cột error trên Sheet", flush=True)

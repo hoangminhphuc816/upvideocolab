@@ -167,9 +167,12 @@ xoá 2 Script Property này sau khi deploy GAS mới (tuỳ chọn).
      (Task PAT trong §6b) rồi PATCH job qua console (headers → Authorization).
    - Workflow KHÔNG bị tự tắt nữa vì không còn trigger `schedule`.
 5. Run đỏ của `video-controller` đọc thế nào (từ 16-10-2026):
-   - Các step khác đỏ thường là lỗi hạ tầng CI (checkout, pip, sweep); riêng 2
+   - Các step khác đỏ thường là lỗi hạ tầng CI (checkout, pip); riêng 2
      step dispatch (`Xử lý job PENDING/RETRY còn lại (watchdog → Colab VM)` /
-     `Dispatch job lên Colab VM`) có thể đỏ theo nghĩa mô tả ở dưới.
+     `Dispatch job lên Colab VM`) có thể đỏ theo nghĩa mô tả ở dưới. Nếu
+     step `sweep` đỏ, đọc annotation `::error::` để phân biệt: có job_id
+     (ví dụ `4 job chuyển FAILED: JOB-1, JOB-2`) → job chết thật; không có
+     job_id / thiếu annotation → lỗi hạ tầng.
    - **Đỏ = dispatch hỏng thật**: worker của lượt này không claim được job
      (Sheet vẫn PENDING/RETRY, cột `worker` khác `WORKER_ID`) → job không
      chạy, cần xem log + annotation `::error::` của run.
@@ -252,12 +255,13 @@ python -m controller.colab_dispatch
 # claim (verify-after-write) → tải + upload
 # Lần chạy đầu với session mới, worker tự warm entity cache (get_dialogs).
 # Nếu TARGET_CHANNEL sai:
-# - id >= 0 (dương, hoặc 0) → runner chặn NGAY trước khi thuê VM, không tốn session.
+# - id >= 0 (dương, hoặc 0) → controller chặn NGAY trước khi thuê VM, không tốn session.
 #   Kênh phải là -100xxxxxxxxxx (nhóm cũ: -123…). Lấy: forward 1 tin từ kênh sang
 #   @userinfobot (runbook §1).
 # - id đúng dạng âm nhưng account không truy cập được kênh đó → Telethon ném marker
 #   vĩnh viễn `Could not find the input entity ...`, worker đánh FAILED ngay, không RETRY.
-#   Thêm account làm admin kênh.
+#   FAILED là terminal: `next_job` bỏ qua, sweep không xử lý, không tự hồi phục.
+#   Sửa TARGET_CHANNEL / cấp quyền rồi gửi lại link.
 ```
 
 ### b) 1.5GB qua Actions
@@ -311,7 +315,7 @@ python -m controller.colab_dispatch
 | Actions run không xuất hiện sau /dl | Đúng thiết kế: tin nhắn chỉ xếp hàng, chờ sweep 2h kế tiếp. Nếu quá 2h vẫn không có run: kiểm tra cron-job.org và đã deploy GAS mới chưa |
 | Run đỏ: `colab run exit 1`, log có `ReadTimeout ... colab.research.google.com ... read timeout=120` | Colab assign chậm/quá tải (timeout 120s mặc định của google-auth). Controller thử tối đa 3 lần (cách 20s/40s) khi VM **chưa** claim job. Hết lượt mà vẫn lỗi: run đỏ nhưng job vẫn `PENDING`, sweep 2h sau thử tiếp — không mất job, không cần sửa tay |
 | `AuthKeyDuplicatedError` Telethon | Session dùng ở 2 IP **đồng thời** — auth key chết vĩnh viễn (`can no longer be used`), retry không cứu. Nguyên nhân đã biết: (a) sweep cướp job vì upload không có nhịp tim, (b) runner cancel ở `timeout-minutes` bỏ rơi VM đang upload. Xử lý: `tools/make_session.py` → update secret `TELETHON_SESSION` → kết thúc phiên cũ trong Telegram → dispatch lại. Phòng ngừa: runbook §3a + plan `docs/superpowers/plans/2026-11-22-authkey-duplicated-fencing.md` |
-| `Could not find the input entity for PeerUser` / `PeerChannel` | id >= 0 (dương/0) bị runner chặn ngay; nếu id đúng dạng âm nhưng account không truy cập được kênh → marker vĩnh viễn, FAILED ngay không RETRY. Kiểm tra TARGET_CHANNEL + thêm account làm admin kênh |
+| `Could not find the input entity for PeerUser` / `PeerChannel` | `id >= 0` đã bị controller chặn từ §9a trở đi; `PeerUser` chỉ còn khả năng trong chạy cũ. Nếu gặp bây giờ thường là `PeerChannel`: id dạng âm nhưng account không truy cập kênh → marker vĩnh viễn, FAILED ngay không RETRY. FAILED là terminal: không tự hồi phục. Kiểm tra TARGET_CHANNEL + cấp quyền rồi gửi lại link |
 | `FloodWaitError` | Worker đã set flood_sleep_threshold=120; nếu vẫn chờ lâu hơn, để job treo → sweep RETRY |
 | Sheet `PERMISSION_DENIED` | SA chưa được Share Editor Sheet |
 | Video không stream được trong kênh | ffprobe chặn file không có video stream; codec lạ (vd HEVC/mkv) vẫn qua ffprobe nhưng kênh có thể không stream được |

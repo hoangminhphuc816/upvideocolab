@@ -108,8 +108,7 @@ class SheetQueue:
             if status == "RETRY":
                 if self._to_int(row[self._col["retry_count"] - 1]) >= MAX_RETRIES:
                     # Hết lượt ⇒ không dispatch nữa (chặn vòng lặp thuê VM).
-                    # Việc chuyển sang FAILED thuộc sweep_stale — hiện CHƯA làm,
-                    # và ở trạng thái này job sẽ kẹt im lặng, không notify.
+                    # sweep_stale() chuyển dòng này sang FAILED và notify owner.
                     continue
                 priority = 0
             elif status == "PENDING":
@@ -263,8 +262,9 @@ class SheetQueue:
         return n
 
     def sweep_stale(self, older_than_min: int = 15, max_retries: int = MAX_RETRIES) -> list[str]:
-        """Job đang in-flight (CLAIMED/DOWNLOADING/UPLOADING) quá cũ → RETRY.
+        """Job đang in-flight (CLAIMED/DOWNLOADING/UPLOADING/RETRY) quá cũ → RETRY.
 
+        RETRY vượt ngưỡng → FAILED; RETRY còn sống → PENDING.
         PENDING không bị sweep: chưa từng thử ⇒ không tính là stale.
         Trả về danh sách job_id vừa bị FAILED để caller notify.
         Tuổi tính bằng updated_at (fallback created_at) so với now.
