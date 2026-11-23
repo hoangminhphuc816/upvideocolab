@@ -64,6 +64,26 @@ def test_target_channel_am_hop_le(monkeypatch):
         assert load_config().target_channel == int(good)
 
 
+def test_sweep_khong_crash_khi_target_channel_duong(monkeypatch):
+    """Job `sweep` mang TARGET_CHANNEL trong env nhưng không dùng nó.
+
+    Validation dấu là chuyện của worker; nếu áp cho cả sweep thì `python -m
+    worker.main --sweep` crash mỗi lượt và bước dispatch (`if: always()`) vẫn
+    thuê VM ⇒ đốt session.
+    """
+    _set_env(monkeypatch, TARGET_CHANNEL="1234567890")
+    cfg = load_config(required=SWEEP_REQUIRED)
+    assert cfg.sheet_id == "abc123sheetid"
+    assert cfg.target_channel == 1234567890   # thô, không kiểm dấu
+
+
+def test_worker_van_chan_target_channel_0(monkeypatch):
+    """0 cũng map PeerUser ⇒ phải chặn khi TARGET_CHANNEL là biến bắt buộc."""
+    _set_env(monkeypatch, TARGET_CHANNEL="0")
+    with pytest.raises(ValueError, match="TARGET_CHANNEL"):
+        load_config()
+
+
 def test_load_config_invalid_int_fails(monkeypatch):
     _set_env(monkeypatch, TELEGRAM_API_ID="khong-phai-so")
     with pytest.raises(ValueError, match="số nguyên"):

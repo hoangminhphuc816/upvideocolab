@@ -60,10 +60,10 @@ def load_config(required: Iterable[str] | None = None) -> Config:
     target_channel = _int("TARGET_CHANNEL")
     # Telethon map id KHÔNG ÂM thành PeerUser (resolve_id: >=0 → PeerUser) ⇒ send_file
     # ném "Could not find the input entity for PeerUser" chỉ SAU khi đã tải xong video
-    # trên VM, đốt trọn 1 session Colab. Bắt ở đây để chết ngay trên runner.
-    # Chỉ chặn >= 0: nhóm cũ (-123…) là PeerChat và vẫn gửi được.
-    # `0` chỉ hợp lệ với sweep (required=SWEEP_REQUIRED, không cần kênh).
-    if target_channel > 0 or ("TARGET_CHANNEL" in req and target_channel == 0):
+    # trên VM, đốt trọn 1 session Colab. Chỉ kiểm khi TARGET_CHANNEL là biến bắt buộc:
+    # sweep (SWEEP_REQUIRED) mang biến này trong env nhưng không dùng channel, chặn
+    # ở đó sẽ crash mỗi lượt.
+    if "TARGET_CHANNEL" in req and target_channel >= 0:
         raise ValueError(
             f"TARGET_CHANNEL phải là id ÂM (kênh: -100xxxxxxxxxx, nhóm cũ: -123…), "
             f"nhận được {target_channel}. Lấy bằng cách forward 1 tin từ kênh sang "
