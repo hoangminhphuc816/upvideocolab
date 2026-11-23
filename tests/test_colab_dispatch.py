@@ -2,8 +2,10 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import ast
 import json
 import types
+from pathlib import Path
 import pytest
 
 from worker.config import Config
@@ -15,6 +17,16 @@ from controller.colab_dispatch import (
     day_start_epoch,
     dispatch_to_colab,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_orphan_cleanup(request):
+    """Mặc định không chạm colab_cli/auth; test cần hàm thật khai báo marker."""
+    if "real_orphan_cleanup" in request.keywords:
+        yield
+        return
+    with patch("controller.colab_dispatch._stop_orphan_assignments", return_value=0):
+        yield
 
 
 def make_cfg():
@@ -77,7 +89,8 @@ def test_write_bootstrap_captures_subprocess_output(monkeypatch):
 def test_materialize_token_writes_settings(tmp_path):
     """settings.json phải được ghi cùng token để tắt update-check trong CI."""
     token = tmp_path / ".config" / "colab-cli" / "token.json"
-    with patch("controller.colab_dispatch.TOKEN_PATH", token):
+    with patch("controller.colab_dispatch.TOKEN_PATH", token), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         _materialize_token("{tok}")
     settings = token.parent / "settings.json"
     assert json.loads(settings.read_text()) == {"enable_update_check": False}
@@ -90,7 +103,8 @@ def test_dispatch_no_job_returns_zero_without_colab(tmp_path, monkeypatch):
     q.next_job.return_value = None
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run") as run, \
-         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
     assert rc == 0
     run.assert_not_called()
@@ -134,7 +148,8 @@ def test_dispatch_job_permanent_failure_is_green(tmp_path, monkeypatch, capsys):
     run = MagicMock(return_value=MagicMock(returncode=2))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run", run), \
-         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
     assert rc == 0
     out = capsys.readouterr().out
@@ -154,7 +169,8 @@ def test_dispatch_worker_never_claimed_is_red(tmp_path, monkeypatch, capsys):
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run", run), \
          patch("controller.colab_dispatch._sleep", lambda _s: None), \
-         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
     assert rc == 1
     assert "::error::JOB-1" in capsys.readouterr().out
@@ -173,7 +189,8 @@ def test_dispatch_retry_with_stale_worker_is_red(tmp_path, monkeypatch, capsys):
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run", run), \
          patch("controller.colab_dispatch._sleep", lambda _s: None), \
-         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
     assert rc == 1
     assert "::error::JOB-1" in capsys.readouterr().out
@@ -190,7 +207,8 @@ def test_dispatch_vm_died_midway_is_green(tmp_path, monkeypatch, capsys):
     run = MagicMock(return_value=MagicMock(returncode=1))
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run", run), \
-         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{tok}")
     assert rc == 0
     assert "::warning::JOB-1" in capsys.readouterr().out
@@ -203,7 +221,8 @@ def test_dispatch_throttle_du_4_upload_thi_khong_goi_colab(tmp_path, monkeypatch
     q.count_done_since.return_value = 4          # đã đủ 4 upload hôm nay
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run") as run, \
-         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
     assert rc == 0
     run.assert_not_called()                      # KHÔNG tốn session Colab
@@ -217,7 +236,8 @@ def test_dispatch_duoi_nguong_thi_van_chay_colab(tmp_path, monkeypatch):
     q.get_job.return_value = Job("JOB-1", "DONE", "u", 42, 100, 200, "local", None, "", 0, "0", 2)
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run") as run, \
-         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"):
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         run.return_value = types.SimpleNamespace(returncode=0)
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
     assert rc == 0
@@ -267,6 +287,7 @@ def test_dispatch_goi_release_waiting_truoc_next_job(tmp_path, monkeypatch):
          patch("controller.colab_dispatch.subprocess.run") as run, \
          patch("controller.colab_dispatch.TOKEN_PATH",
                tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"), \
          patch("controller.colab_dispatch.day_start_epoch", return_value=123456):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV,
                               colab_token_json="{}")
@@ -287,6 +308,7 @@ def test_dispatch_release_waiting_loi_van_tiep_tuc(tmp_path, monkeypatch, capsys
          patch("controller.colab_dispatch.subprocess.run") as run, \
          patch("controller.colab_dispatch.TOKEN_PATH",
                tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"), \
          patch("controller.colab_dispatch.day_start_epoch", return_value=123456):
         rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV,
                               colab_token_json="{}")
@@ -370,7 +392,9 @@ def test_dispatch_colab_binary_missing_is_red(tmp_path, monkeypatch, capsys):
     q.release_waiting.return_value = 0
     with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
          patch("controller.colab_dispatch.subprocess.run",
-               side_effect=FileNotFoundError("No such file or directory: 'colab'")):
+               side_effect=FileNotFoundError("No such file or directory: 'colab'")), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / ".config" / "colab-cli" / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
         from controller.colab_dispatch import dispatch_to_colab
         rc = dispatch_to_colab(cfg, worker_env={}, colab_token_json="{}")
     assert rc == 1
@@ -502,7 +526,7 @@ def test_dispatch_khong_retry_khi_head_doi_job(tmp_path, monkeypatch, capsys):
     assert "::error::JOB-1" in capsys.readouterr().out
 
 
-def test_main_missing_env_raises_value_error(monkeypatch):
+def test_main_missing_env_raises_value_error(monkeypatch, tmp_path):
     from controller.colab_dispatch import main
     for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "TELEGRAM_API_HASH",
                 "TARGET_CHANNEL", "OWNER_CHAT_ID", "GCP_SA_JSON", "SHEET_ID",
@@ -510,13 +534,15 @@ def test_main_missing_env_raises_value_error(monkeypatch):
         monkeypatch.setenv(key, "x")
     for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "GCP_SA_JSON", "COLAB_TOKEN_JSON"]:
         monkeypatch.delenv(key)
-    with pytest.raises(ValueError, match="thiếu biến môi trường"):
-        main()
-    try:
-        main()
-    except ValueError as e:
-        for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "GCP_SA_JSON", "COLAB_TOKEN_JSON"]:
-            assert key in str(e), f"{key} missing from ValueError message: {e}"
+    with patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
+        with pytest.raises(ValueError, match="thiếu biến môi trường"):
+            main()
+        try:
+            main()
+        except ValueError as e:
+            for key in ["TELETHON_SESSION", "TELEGRAM_API_ID", "GCP_SA_JSON", "COLAB_TOKEN_JSON"]:
+                assert key in str(e), f"{key} missing from ValueError message: {e}"
 
 
 def test_classify_run_auth_key_chet_thi_do_va_chi_cach_sua(capsys):
@@ -550,3 +576,135 @@ def test_classify_run_bi_cat_session_bi_cut_cuc_van_do(capsys):
         out = capsys.readouterr().out
         assert "::error::JOB-1" in out
         assert "make_session.py" in out
+
+
+@pytest.mark.real_orphan_cleanup
+def test_stop_orphan_assignments_unassign_het_va_khong_chet(monkeypatch, capsys):
+    """VM mồ côi phải bị unassign; lỗi từng cái không được chặn cả bước dọn."""
+    from controller.colab_dispatch import _stop_orphan_assignments
+    import colab_cli.common as colab_common
+
+    fake_state = MagicMock()
+    fake_state.sync_sessions.return_value = (
+        {}, [MagicMock(endpoint="ep-old"), MagicMock(endpoint="ep-dead")])
+    fake_state.client.unassign.side_effect = [None, RuntimeError("gone")]
+    monkeypatch.setattr(colab_common, "state", fake_state)
+
+    assert _stop_orphan_assignments() == 1
+    assert [c.args[0] for c in fake_state.client.unassign.call_args_list] == ["ep-old", "ep-dead"]
+    out = capsys.readouterr().out
+    assert "unassign 1" in out
+    assert "ep-dead" in out
+
+
+def test_dispatch_don_orphan_ngay_truoc_khi_thue_vm(tmp_path, monkeypatch):
+    """Cleanup phải chạy SAU khi biết có job + quota còn, và TRUOC subprocess.run.
+
+    Chạy sớm hơn (trước next_job/quota) sẽ unassign một VM đang upload khoẻ mà
+    next_job() không thấy (job UPLOADING) ⇒ mất một lượt upload sắp xong.
+    """
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    q = MagicMock()
+    q.next_job.return_value = MagicMock(job_id="JOB-1", status="PENDING", url="u")
+    q.count_done_since.return_value = 0
+    order = []
+    q.next_job.side_effect = lambda: order.append("next_job") or MagicMock(
+        job_id="JOB-1", status="PENDING", url="u")
+    run = MagicMock(side_effect=lambda cmd, check: order.append("run") or MagicMock(returncode=0))
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch._stop_orphan_assignments",
+               side_effect=lambda: order.append("cleanup") or 0), \
+         patch("controller.colab_dispatch.subprocess.run", run), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
+        from controller.colab_dispatch import dispatch_to_colab
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
+    assert rc == 0
+    assert order == ["next_job", "cleanup", "run"]
+
+
+def test_dispatch_khong_don_orphan_khi_khong_co_job(tmp_path, monkeypatch):
+    """Không có job (hoặc hết quota) ⇒ không được unassign VM nào."""
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    q = MagicMock()
+    q.next_job.return_value = None
+    calls = []
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch._stop_orphan_assignments",
+               side_effect=lambda: calls.append("cleanup") or 0), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
+        from controller.colab_dispatch import dispatch_to_colab
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
+    assert rc == 0
+    assert calls == []
+
+
+def test_dispatch_khong_don_orphan_khi_het_quota(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKER_REPO", "owner/repo")
+    q = MagicMock()
+    q.next_job.return_value = MagicMock(job_id="JOB-1", status="PENDING", url="u")
+    q.count_done_since.return_value = 10
+    calls = []
+    with patch("controller.colab_dispatch.SheetQueue", return_value=q), \
+         patch("controller.colab_dispatch._stop_orphan_assignments",
+               side_effect=lambda: calls.append("cleanup") or 0), \
+         patch("controller.colab_dispatch.TOKEN_PATH", tmp_path / "token.json"), \
+         patch("controller.colab_dispatch.HISTORY_DIR", tmp_path / "history"):
+        from controller.colab_dispatch import dispatch_to_colab
+        rc = dispatch_to_colab(make_cfg(), worker_env=WORKER_ENV, colab_token_json="{}")
+    assert rc == 0
+    assert calls == []
+
+
+def test_moi_test_cham_dispatch_deu_patch_token_path():
+    """TOKEN_PATH/HISTORY_DIR là hằng lúc import ⇒ mọi test gọi dispatch_to_colab/main
+    phải patch cả hai, nếu không sẽ ghi đoe ~/.config/colab-cli/token.json hoặc xóa
+    history/ của máy dev.
+
+    Dùng AST: chỉ tính test thật sự GỌI hàm, và bỏ qua chuỗi nằm trong docstring —
+    nếu không, một test chỉ *nhắc* TOKEN_PATH/HISTORY_DIR trong docstring sẽ lọt guard.
+    """
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+
+    def calls(node, names):
+        return any(
+            (isinstance(c, ast.Call) and (
+                (isinstance(c.func, ast.Name) and c.func.id in names)
+                or (isinstance(c.func, ast.Attribute) and c.func.attr in names)))
+            for c in ast.walk(node)
+        )
+
+    def has_ref(node, target):
+        """Tham chiếu `target` ngoài docstring (Attribute hoặc string literal)."""
+        docstrings = {
+            id(n.value) for n in ast.walk(node)
+            if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+        }
+        for n in ast.walk(node):
+            if isinstance(n, ast.Attribute) and n.attr == target:
+                return True
+            if (isinstance(n, ast.Constant) and isinstance(n.value, str)
+                    and target in n.value and id(n) not in docstrings):
+                return True
+        return False
+
+    # Vết lỗ: docstring chỉ *nhắc* TOKEN_PATH/HISTORY_DIR không được tính là đã patch.
+    sample = ast.parse(
+        'def test_x():\n'
+        '    """doc nhac TOKEN_PATH HISTORY_DIR"""\n'
+        '    dispatch_to_colab(a, b, c)\n'
+    ).body[0]
+    assert calls(sample, {"dispatch_to_colab", "main", "_materialize_token"}) is True
+    assert has_ref(sample, "TOKEN_PATH") is False
+    assert has_ref(sample, "HISTORY_DIR") is False
+
+    offenders = [
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+        and calls(node, {"dispatch_to_colab", "main", "_materialize_token"})
+        and not (has_ref(node, "TOKEN_PATH") and has_ref(node, "HISTORY_DIR"))
+    ]
+    assert offenders == [], f"thiếu patch TOKEN_PATH/HISTORY_DIR → sẽ ghi/xóa ra HOME thật: {offenders}"

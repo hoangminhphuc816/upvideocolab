@@ -101,6 +101,33 @@ def _annotate(level: str, message: str) -> None:
     print(f"::{level}::{message}", flush=True)
 
 
+def _stop_orphan_assignments() -> int:
+    """Unassign mọi VM còn sống trên tài khoản trước khi cấp VM mới.
+
+    Concurrency group chỉ serialize các run; run bị cancel ở `timeout-minutes`
+    KHÔNG teardown được VM (CLI 0.6.0 không có signal handler) ⇒ VM mồ côi vẫn giữ
+    kernel đang upload với cùng TELETHON_SESSION. Dọn trước là điều kiện để giữ
+    bất biến "1 session = 1 client".
+    """
+    from colab_cli.common import state
+
+    try:
+        _sessions, assignments = state.sync_sessions()
+    except SystemExit:
+        _annotate("warning", "colab sessions: auth lỗi — bỏ qua bước dọn VM mồ côi")
+        return 0
+    stopped = 0
+    for a in assignments:
+        try:
+            state.client.unassign(a.endpoint)
+            stopped += 1
+        except Exception as e:  # best-effort: không được chặn dispatch
+            _annotate("warning", f"không unassign được {a.endpoint}: {e}")
+    if stopped:
+        _annotate("warning", f"đã unassign {stopped} Colab assignment mồ côi trước khi dispatch")
+    return stopped
+
+
 def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: int) -> int:
     """Map exit code của `colab run` → exit code của CI (xem docstring đầu file).
 
@@ -255,6 +282,16 @@ def dispatch_to_colab(cfg: Config, worker_env: dict[str, str], colab_token_json:
         return 0
 
     worker_id = os.environ.get("WORKER_ID", os.environ.get("GITHUB_RUN_ID", "local"))
+
+    # Dọn VM mồ côi NGAY TRUOC khi thuê VM — không phải trước khi biết có job.
+    # Chạy sớm hơn sẽ unassign một VM đang upload khoẻ (heartbeat giữ job UPLOADING
+    # nên next_job() không thấy nó), biến một lượt upload sắp xong thành session mới
+    # phải tải lại từ đầu — đúng thứ branch này chống.
+    try:
+        _stop_orphan_assignments()
+    except Exception as e:  # phòng hờ import/attr sai ở version CLI khác
+        _annotate("warning", f"dọn VM mồ côi lỗi — bỏ qua: {e}")
+
     bootstrap = _write_bootstrap(worker_env, worker_id)
     fd, path = tempfile.mkstemp(suffix=".py", prefix="colab-bootstrap-")
     try:
