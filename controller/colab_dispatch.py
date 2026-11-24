@@ -86,6 +86,7 @@ AUTH_KEY_MARKERS = ("AuthKeyDuplicated", "AuthKeyUnregistered", "AuthKeyInvalid"
                     "Not a valid string", "Incorrect padding",
                     "unpack requires a buffer", "ApiIdInvalid",
                     "TELETHON_SESSION không hợp lệ")
+TARGET_CHANNEL_PERMANENT = "TARGET_CHANNEL không truy cập được"
 
 
 def _materialize_token(colab_token_json: str) -> None:
@@ -163,6 +164,12 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
                            f"Retry vô ích — chạy tools/make_session.py, cập nhật secret "
                            f"TELETHON_SESSION (runbook §3), rồi dispatch lại.")
         return 1
+    if job.error and TARGET_CHANNEL_PERMANENT in job.error:
+        _annotate("error", f"{job_id}: TARGET_CHANNEL không truy cập được "
+                           f"({job.error[:150]}). Chẩn đoán local:\n"
+                           f"  set -a; source .env; set +a\n"
+                           f"  .venv/bin/python tools/check_telegram_target.py")
+        return 1
     if job.status == "FAILED":
         detail = f" ({job.error})" if job.error else ""
         _annotate("error", f"{job_id}: job FAILED{detail}")
@@ -182,9 +189,14 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
         queue.set_status(
             job.job_id,
             job.status,
-            error=f"worker dừng giữa chừng (exit {returncode}) — có thể vượt hạn "
-                  f"COLAB_RUN_TIMEOUT_S={COLAB_RUN_TIMEOUT_S}s",
+            error=f"worker thoát trước khi ghi lỗi vào Sheet (exit {returncode}) — "
+                  f"có thể là FloodWait/timeout ở preflight; xem log worker",
         )
+        _annotate("warning", f"{job_id}: worker thoát exit {returncode} trước khi ghi "
+                             f"lỗi vào Sheet (job còn {job.status}) — nếu là FloodWait/"
+                             f"timeout ở preflight, sweep sẽ RETRY; xem log worker "
+                             f"trên VM để chắc chắn")
+        return 0
     _annotate("warning", f"{job_id}: worker dừng giữa chừng (exit {returncode}, "
                          f"Sheet={job.status}) — sweep sẽ RETRY")
     return 0

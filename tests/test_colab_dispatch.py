@@ -256,8 +256,12 @@ def test_classify_run_ghi_ly_do_khi_worker_dung_giua_chung(capsys):
     assert "::warning::JOB-1" in capsys.readouterr().out
     q.set_status.assert_called_once()
     kwargs = q.set_status.call_args.kwargs
-    assert kwargs["error"].startswith("worker dừng giữa chừng")
-    assert "7200" in kwargs["error"]
+    err = kwargs["error"]
+    # Worker có thể thoát vì vượt hạn COLAB_RUN_TIMEOUT_S, hoặc vì một lỗi
+    # thoáng qua ở preflight (FloodWait/timeout) — cả hai đều không ghi được
+    # lý do. Không được khẳng định một nguyên nhân duy nhất.
+    assert "exit 1" in err
+    assert "FloodWait/timeout" in err or "7200" in err
 
 
 def test_classify_run_khong_ghi_de_error_da_co(capsys):
@@ -596,6 +600,44 @@ def test_classify_run_auth_key_chet_thi_do_va_chi_cach_sua(capsys):
     assert "::error::JOB-1" in out
     assert "AuthKeyDuplicated" in out
     assert "make_session.py" in out
+
+
+def test_classify_transient_error_rong_ghi_warning_khong_doan_vuot_han(capsys):
+    """Transient ở preflight KHÔNG ghi error vào Sheet — annotation phải nói
+    'thoát trước khi ghi lỗi', KHÔNG được đoán 'vượt hạn COLAB_RUN_TIMEOUT_S'."""
+    from controller.colab_dispatch import _classify_run
+    q = MagicMock()
+    job = MagicMock()
+    job.status = "CLAIMED"
+    job.worker = "w"
+    job.error = ""          # đúng trạng thái production sau preflight transient
+    q.get_job.return_value = job
+    rc = _classify_run(q, "JOB-1", "w", 1)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "vượt hạn" not in out
+    assert "RETRY" in out
+
+
+def test_classify_permanent_target_error_khong_bi_auth_marker_nuot(capsys):
+    """Message permanent của TARGET_CHANNEL không chứa auth marker nào —
+    nhánh TARGET_CHANNEL_PERMANENT phải thắng nhánh AUTH_KEY_MARKERS."""
+    from controller.colab_dispatch import _classify_run, AUTH_KEY_MARKERS
+    err = ("TARGET_CHANNEL không truy cập được (-1004401263522): ValueError: "
+           "Could not find the input entity for PeerChannel")
+    assert not any(m in err for m in AUTH_KEY_MARKERS), \
+        "tiền đề test sai: message vô tình khớp auth marker"
+    q = MagicMock()
+    job = MagicMock()
+    job.status = "FAILED"
+    job.worker = "w"
+    job.error = err
+    q.get_job.return_value = job
+    rc = _classify_run(q, "JOB-1", "w", 1)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "check_telegram_target.py" in out
+    assert "session Telegram đã chết" not in out
 
 
 def test_classify_run_bi_cat_session_bi_cut_cuc_van_do(capsys):
