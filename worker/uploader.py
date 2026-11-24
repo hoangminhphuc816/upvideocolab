@@ -6,7 +6,7 @@ import logging
 import os
 
 from telethon import TelegramClient, utils
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, ServerError, TimedOutError
 from telethon.sessions import StringSession
 from telethon.tl.types import DocumentAttributeVideo
 
@@ -34,7 +34,15 @@ async def _safe_disconnect(client: TelegramClient) -> None:
         log.exception("disconnect lỗi (bỏ qua)")
 
 
-_TRANSIENT_EXC = (FloodWaitError, asyncio.TimeoutError, TimeoutError, ConnectionError, OSError)
+# Lỗi tạm thời phía hạ tầng/mạng. `asyncio.TimeoutError` là alias của `TimeoutError`
+# (cả hai ⊂ `OSError`) nên các tên đó dư thừa về mặt isinstance, nhưng giữ lại để
+# đọc rõ ý định. `ServerError`/`TimedOutError` là RPCError, KHÔNG phải OSError —
+# thiếu chúng thì get_dialogs fail bằng lỗi đó sẽ rơi xuống get_entity, gặp
+# ChannelInvalidError và thành FAILED vĩnh viễn (đúng chuỗi sự cố cũ).
+_TRANSIENT_EXC = (
+    FloodWaitError, ServerError, TimedOutError,
+    asyncio.TimeoutError, TimeoutError, ConnectionError, OSError,
+)
 
 
 def _raise_target_error(target: int, exc: Exception) -> None:

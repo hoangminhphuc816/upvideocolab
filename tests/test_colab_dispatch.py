@@ -619,6 +619,23 @@ def test_classify_transient_error_rong_ghi_warning_khong_doan_vuot_han(capsys):
     assert "RETRY" in out
 
 
+def test_classify_target_channel_khong_dung_duoc_cung_tro_tool(capsys):
+    """Message min/không hash (`không dùng được`) cũng là permanent và phải
+    trỏ tool — trước đây chỉ marker `không truy cập được` được khớp."""
+    from controller.colab_dispatch import _classify_run
+    q = MagicMock()
+    job = MagicMock()
+    job.status = "FAILED"
+    job.worker = "w"
+    job.error = ("TARGET_CHANNEL không dùng được (-1004401263522): Channel "
+                 "without access_hash or min info cannot be input")
+    q.get_job.return_value = job
+    rc = _classify_run(q, "JOB-1", "w", 1)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "check_telegram_target.py" in out
+
+
 def test_classify_permanent_target_error_khong_bi_auth_marker_nuot(capsys):
     """Message permanent của TARGET_CHANNEL không chứa auth marker nào —
     nhánh TARGET_CHANNEL_PERMANENT phải thắng nhánh AUTH_KEY_MARKERS."""

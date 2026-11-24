@@ -78,13 +78,16 @@ def test_tool_chay_duoc_tu_duong_dan_docs(tmp_path):
     Chạy như `main(argv)` thật: `sys.path[0]` là thư mục của script (`tools/`),
     nên `import worker...` chỉ chạy được nhờ `sys.path.insert` trong tool.
     `-I` (isolated) tắt PYTHONPATH kế thừa; `cwd=tmp_path` để repo root không
-    lọt vào path qua thư mục hiện tại.
+    lọt vào path qua thư mục hiện tại. `env={}` bắt buộc: `-I` KHÔNG xoá biến
+    môi trường thường, nên dev đã `source .env` sẽ khiến tool mở TelegramClient
+    thật (treo ở start(), nguy cơ AuthKeyDuplicatedError) — trái constraint
+    "test offline".
     """
     from pathlib import Path
     tool = Path(__file__).resolve().parent.parent / "tools" / "check_telegram_target.py"
     r = subprocess.run(
         [sys.executable, "-I", str(tool)],
-        cwd=tmp_path, capture_output=True, text=True)
+        cwd=tmp_path, capture_output=True, text=True, env={})
     assert "ModuleNotFoundError" not in r.stderr, r.stderr
     # Không có env -> load_config() ném ValueError; đó là dấu hiệu import ĐÃ chạy.
     assert "Thiếu biến môi trường" in r.stderr or "ValueError" in r.stderr, r.stderr

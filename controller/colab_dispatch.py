@@ -86,7 +86,8 @@ AUTH_KEY_MARKERS = ("AuthKeyDuplicated", "AuthKeyUnregistered", "AuthKeyInvalid"
                     "Not a valid string", "Incorrect padding",
                     "unpack requires a buffer", "ApiIdInvalid",
                     "TELETHON_SESSION không hợp lệ")
-TARGET_CHANNEL_PERMANENT = "TARGET_CHANNEL không truy cập được"
+TARGET_CHANNEL_PERMANENT = ("TARGET_CHANNEL không truy cập được",
+                            "TARGET_CHANNEL không dùng được")
 
 
 def _materialize_token(colab_token_json: str) -> None:
@@ -164,7 +165,7 @@ def _classify_run(queue: SheetQueue, job_id: str, worker_id: str, returncode: in
                            f"Retry vô ích — chạy tools/make_session.py, cập nhật secret "
                            f"TELETHON_SESSION (runbook §3), rồi dispatch lại.")
         return 1
-    if job.error and TARGET_CHANNEL_PERMANENT in job.error:
+    if job.error and any(m in job.error for m in TARGET_CHANNEL_PERMANENT):
         _annotate("error", f"{job_id}: TARGET_CHANNEL không truy cập được "
                            f"({job.error[:150]}). Chẩn đoán local:\n"
                            f"  set -a; source .env; set +a\n"

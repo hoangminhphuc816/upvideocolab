@@ -6,7 +6,7 @@ import pytest
 import struct
 
 from telethon import utils
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, ServerError, TimedOutError
 from telethon.tl import types
 
 from worker.config import Config
@@ -299,6 +299,24 @@ async def test_resolve_loi_tam_thoi_la_transient(exc):
         with pytest.raises(TransientUploadError):
             await resolve_target_channel(make_cfg())
     client.disconnect.assert_awaited()
+
+
+@pytest.mark.parametrize("exc", [
+    ServerError(request=None, message="internal", code=500),
+    TimedOutError(request=None, message="timed out"),
+])
+@pytest.mark.asyncio
+async def test_resolve_loi_ha_tang_rpc_la_transient(exc):
+    """ServerError/TimedOutError là RPCError (không phải OSError) — vẫn phải
+    transient. Thiếu chúng thì get_dialogs fail -> get_entity -> ChannelInvalid
+    -> FAILED vĩnh viễn, đúng chuỗi sự cố cũ."""
+    from worker.uploader import resolve_target_channel, TransientUploadError
+    client = make_client()
+    client.get_dialogs = AsyncMock(side_effect=exc)
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        with pytest.raises(TransientUploadError):
+            await resolve_target_channel(make_cfg())
 
 
 @pytest.mark.asyncio
