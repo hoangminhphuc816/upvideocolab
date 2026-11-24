@@ -253,15 +253,18 @@ set -a; source .env; set +a
 python -m controller.colab_dispatch
 # Kỳ vọng: controller peek queue → `colab run` bootstrap → worker TRÊN VM tự
 # claim (verify-after-write) → tải + upload
-# Lần chạy đầu với session mới, worker tự warm entity cache (get_dialogs).
+# Worker resolve TARGET_CHANNEL TRƯỚC khi tải video (preflight), nên cấu hình sai
+# chết trong vài giây chứ không đốt một lượt tải 1.5GB.
 # Nếu TARGET_CHANNEL sai:
 # - id >= 0 (dương, hoặc 0) → controller chặn NGAY trước khi thuê VM, không tốn session.
 #   Kênh phải là -100xxxxxxxxxx (nhóm cũ: -123…). Lấy: forward 1 tin từ kênh sang
 #   @userinfobot (runbook §1).
-# - id đúng dạng âm nhưng account không truy cập được kênh đó → Telethon ném marker
-#   vĩnh viễn `Could not find the input entity ...`, worker đánh FAILED ngay, không RETRY.
+# - id đúng dạng âm nhưng account không truy cập được kênh đó → marker vĩnh viễn
+#   `Could not find the input entity ...`, worker đánh FAILED ngay, không RETRY.
 #   FAILED là terminal: `next_job` bỏ qua, sweep không xử lý, không tự hồi phục.
-#   Sửa TARGET_CHANNEL / cấp quyền rồi gửi lại link.
+#   Chẩn đoán: .venv/bin/python tools/check_telegram_target.py (runbook §10e).
+# - FloodWait/timeout/mất mạng ở bước resolve → message `TARGET_CHANNEL tạm thời
+#   không truy cập được ...`, job về RETRY, sweep thử lại (không mất job).
 ```
 
 ### b) 1.5GB qua Actions
@@ -315,7 +318,7 @@ python -m controller.colab_dispatch
 | Actions run không xuất hiện sau /dl | Đúng thiết kế: tin nhắn chỉ xếp hàng, chờ sweep 2h kế tiếp. Nếu quá 2h vẫn không có run: kiểm tra cron-job.org và đã deploy GAS mới chưa |
 | Run đỏ: `colab run exit 1`, log có `ReadTimeout ... colab.research.google.com ... read timeout=120` | Colab assign chậm/quá tải (timeout 120s mặc định của google-auth). Controller thử tối đa 3 lần (cách 20s/40s) khi VM **chưa** claim job. Hết lượt mà vẫn lỗi: run đỏ nhưng job vẫn `PENDING`, sweep 2h sau thử tiếp — không mất job, không cần sửa tay |
 | `AuthKeyDuplicatedError` Telethon | Session dùng ở 2 IP **đồng thời** — auth key chết vĩnh viễn (`can no longer be used`), retry không cứu. Nguyên nhân đã biết: (a) sweep cướp job vì upload không có nhịp tim, (b) runner cancel ở `timeout-minutes` bỏ rơi VM đang upload. Xử lý: `tools/make_session.py` → update secret `TELETHON_SESSION` → kết thúc phiên cũ trong Telegram → dispatch lại. Phòng ngừa: runbook §3a + plan `docs/superpowers/plans/2026-11-22-authkey-duplicated-fencing.md` |
-| `Could not find the input entity for PeerUser` / `PeerChannel` | `id >= 0` đã bị controller chặn từ §9a trở đi; `PeerUser` chỉ còn khả năng trong chạy cũ. Nếu gặp bây giờ thường là `PeerChannel`: id dạng âm nhưng account không truy cập kênh → marker vĩnh viễn, FAILED ngay không RETRY. FAILED là terminal: không tự hồi phục. Kiểm tra TARGET_CHANNEL + cấp quyền rồi gửi lại link |
+| `Could not find the input entity for PeerUser` / `PeerChannel` | `id >= 0` đã bị controller chặn từ §9a trở đi. Nếu gặp `PeerChannel`: id dạng âm nhưng account không truy cập kênh → marker vĩnh viễn, FAILED ngay không RETRY (FAILED là terminal). Chẩn đoán: `tools/check_telegram_target.py` (§10e). Nếu message có chữ `tạm thời` thì đó là FloodWait/timeout — job về RETRY, sweep thử lại, không cần làm gì |
 | `FloodWaitError` | Worker đã set flood_sleep_threshold=120; nếu vẫn chờ lâu hơn, để job treo → sweep RETRY |
 | Sheet `PERMISSION_DENIED` | SA chưa được Share Editor Sheet |
 | Video không stream được trong kênh | ffprobe chặn file không có video stream; codec lạ (vd HEVC/mkv) vẫn qua ffprobe nhưng kênh có thể không stream được |
@@ -436,6 +439,30 @@ Thực hiện sau mỗi lần sửa `gas/bot-pipeline.gs` để xác minh thủ 
   chất lượng đầu vào, cắt video nhỏ hơn, hoặc chốt nguồn URL thân thiện
   throughput thấp hơn. Nếu muốn giới hạn mạnh hơn nữa, thêm bộ đếm
   session/ngày riêng — ngoài phạm vi hiện tại.
+
+## 10e. Chẩn đoán TARGET_CHANNEL từ local
+
+Khi worker báo `TARGET_CHANNEL không truy cập được (...)`, chạy trên máy local:
+
+```bash
+set -a; source .env; set +a
+.venv/bin/python tools/check_telegram_target.py
+```
+
+Tool in ra `loại entity`, `entity id`, `title`, `access_hash`, `admin`, `số dialog`,
+rồi chỉ ra vấn đề cụ thể. Mã thoát 1 = có vấn đề.
+
+Cách đọc kết quả:
+
+| Dấu hiệu | Nghĩa | Sửa |
+|---|---|---|
+| `access_hash == 0` | Account chưa từng "gặp" kênh — `StringSession` không lưu entity (`_entities` không được serialize) | Mở kênh trong app Telegram một lần, rồi chạy lại tool |
+| `admin: KHÔNG` | Account không có quyền gửi tin vào kênh | Thêm account làm admin kênh |
+| `số dialog nạp được: 0` | `get_dialogs` không trả gì — sai tài khoản hoặc session hỏng | Kiểm `TELETHON_SESSION`; re-mint nếu cần (§3) |
+| `loại entity: User` | `TARGET_CHANNEL` đang trỏ vào người dùng, không phải kênh | Forward 1 tin từ kênh sang @userinfobot lấy `-100xxxxxxxxxx` (§1) |
+
+Nếu tool chạy OK mà worker vẫn lỗi: kiểm xem job có `status = FAILED` từ **trước** khi
+deploy bản này không — FAILED là terminal, phải reset về `PENDING` và `retry_count = 0`.
 
 ## 11. Luật Colab & chính sách dùng
 
