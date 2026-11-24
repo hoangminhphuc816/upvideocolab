@@ -97,7 +97,25 @@ async def resolve_target_channel(cfg: Config):
         await _safe_disconnect(client)
         raise UploadError(f"không kết nối được Telegram: {type(e).__name__}: {e}") from None
 
+    # Session của BOT không dùng được cho việc này: Telegram chặn get_dialogs và
+    # get_entity theo id với bot (BotMethodInvalidError) ⇒ không bao giờ có
+    # access_hash ⇒ lỗi rơi xuống thành "Could not find the input entity", đổ
+    # sang hướng sai (TARGET_CHANNEL/access_hash). Nhận diện ngay tại đây.
     try:
+        try:
+            if await client.is_bot():
+                raise UploadError(
+                    "TELETHON_SESSION là session của BOT, không phải user account — "
+                    "bot bị Telegram chặn get_dialogs (BotMethodInvalidError) nên "
+                    "không resolve được kênh. Tạo lại session bằng số điện thoại "
+                    "account thật: .venv/bin/python tools/make_session.py. "
+                    "BOT_TOKEN chỉ dùng để gửi thông báo, không dùng làm session."
+                )
+        except UploadError:
+            raise
+        except Exception:
+            log.exception("kiểm tra is_bot lỗi (bỏ qua, thử resolve tiếp)")
+
         try:
             await client.get_dialogs()
         except Exception as e:

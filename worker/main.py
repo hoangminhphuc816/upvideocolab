@@ -40,6 +40,12 @@ PERMANENT_SUBSTRINGS = (
     "Could not find the input entity",
     "ChannelInvalid",
     "ChannelPrivate",
+    # Session là của BOT, không phải user account. Retry vô nghĩa: bot vĩnh viễn
+    # không gọi được get_dialogs (BotMethodInvalidError) nên không có access_hash.
+    # Nguyên nhân thật: dán bot token vào prompt 'phone (or bot token)' của
+    # tools/make_session.py. Phục hồi: re-mint bằng số điện thoại account thật.
+    "session của BOT",
+    "BotMethodInvalid",
     # Session Telegram đã chết vĩnh viễn — retry chỉ đốt thêm session Colab.
     # Phục hồi: tools/make_session.py → cập nhật secret TELETHON_SESSION (runbook §3).
     "AuthKeyDuplicated",

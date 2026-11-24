@@ -16,6 +16,7 @@ def make_diag_client(*, is_admin=True, access_hash=123456789, entity_factory=Non
     client.start = AsyncMock()
     client.disconnect = AsyncMock()
     client.get_dialogs = AsyncMock(return_value=[MagicMock(), MagicMock()])
+    client.is_bot = AsyncMock(return_value=False)
 
     if entity_factory is None:
         def entity_factory():
@@ -110,3 +111,21 @@ async def test_diagnose_nhom_cu_khong_can_hash():
         info = await diagnose(make_cfg())
     assert info["needs_hash"] is False
     assert info["access_hash"] == 0
+
+
+@pytest.mark.asyncio
+async def test_diagnose_session_bot_bao_dung_nguyen_nhan():
+    """Session bot: phải nói 'session của BOT' thay vì để lỗi rơi xuống
+    'Could not find the input entity' (đổ sang TARGET_CHANNEL/access_hash)."""
+    from tools.check_telegram_target import diagnose
+    from worker.uploader import UploadError
+
+    client = make_diag_client()
+    client.is_bot = AsyncMock(return_value=True)
+    with patch("tools.check_telegram_target.TelegramClient", return_value=client), \
+         patch("tools.check_telegram_target.StringSession"):
+        with pytest.raises(UploadError, match="session của BOT"):
+            await diagnose(make_cfg())
+    client.get_dialogs.assert_not_awaited()
+    client.disconnect.assert_awaited()
+

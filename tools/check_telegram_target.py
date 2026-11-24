@@ -35,6 +35,23 @@ async def diagnose(cfg: Config) -> dict:
     )
     try:
         await asyncio.wait_for(client.start(), timeout=180)
+        # Session của BOT: Telegram chặn get_dialogs (BotMethodInvalidError) nên
+        # không bao giờ có access_hash. Báo đúng nguyên nhân thay vì để lỗi rơi
+        # xuống "Could not find the input entity". Ca thật: dán bot token vào
+        # prompt "phone (or bot token)" của tools/make_session.py.
+        try:
+            if await client.is_bot():
+                raise UploadError(
+                    "TELETHON_SESSION là session của BOT, không phải user account. "
+                    "Bot bị Telegram chặn get_dialogs (BotMethodInvalidError) nên "
+                    "không resolve được kênh. Sửa: .venv/bin/python "
+                    "tools/make_session.py → nhập SỐ ĐIỆN THOẠI account thật "
+                    "(không phải bot token) → cập nhật secret TELETHON_SESSION."
+                )
+        except UploadError:
+            raise
+        except Exception:
+            pass
         dialogs = await client.get_dialogs()
         try:
             entity = await client.get_entity(cfg.target_channel)
@@ -97,7 +114,9 @@ def main() -> int:
             "  1. Forward 1 tin từ kênh sang @userinfobot -> lấy đúng -100xxxxxxxxxx.\n"
             "  2. Thêm account (chủ session) làm admin kênh.\n"
             "  3. Nếu access_hash == 0 dù đã admin: mở kênh đó trong app Telegram\n"
-            "     một lần (buộc account 'gặp' kênh để Telegram cấp access_hash).",
+            "     một lần (buộc account 'gặp' kênh để Telegram cấp access_hash).\n"
+            "  4. Nếu báo 'session của BOT': session tạo bằng BOT TOKEN. Mint lại\n"
+            "     bằng SỐ ĐIỆN THOẠI account thật — bot không gọi được get_dialogs.",
             file=sys.stderr,
         )
         return 1

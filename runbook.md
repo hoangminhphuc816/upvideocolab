@@ -42,7 +42,17 @@ CI và local đều dùng chung file này; không ghim inline nữa.
 ## 3. StringSession (đăng nhập Telethon 1 lần)
 
 1. Local (trong `.venv` — quy tắc đầu file): `pip install telethon && python tools/make_session.py`
-2. Nhập api_id/api_hash, số điện thoại, mã code Telegram gửi.
+2. Nhập api_id/api_hash, **số điện thoại** account thật, mã code Telegram gửi.
+
+   > **KHÔNG nhập bot token ở bước này.** Telethon hỏi gộp
+   > `Please enter your phone (or bot token):` — dán bot token vào đó tạo ra
+   > session **của bot**. Bot bị Telegram chặn `get_dialogs`
+   > (`BotMethodInvalidError`) nên không bao giờ lấy được `access_hash`, và
+   > worker chết với `Could not find the input entity for PeerChannel` — thông
+   > báo chỉ sang hướng sai (`TARGET_CHANNEL`/`access_hash`).
+   > `BOT_TOKEN` là biến **riêng**, chỉ dùng để gửi thông báo qua Bot API.
+   > `make_session.py` đã chặn sẵn nếu bạn dán token.
+
 3. Copy chuỗi in ra → Actions secret `TELETHON_SESSION`.
    (Session bị thu hồi/thao tác đổi mật khẩu → chạy lại bước này + update secret.)
 

@@ -30,6 +30,9 @@ def make_client(msg_id: int = 777, *, resolved_id: int = 4401263522):
     client.start = AsyncMock()
     client.disconnect = AsyncMock()
     client.get_dialogs = AsyncMock()
+    # Mặc định KHÔNG phải bot. MagicMock trả truthy nếu thiếu → mọi test sẽ
+    # dính nhánh "session của BOT".
+    client.is_bot = AsyncMock(return_value=False)
     client.get_entity = AsyncMock(return_value=types.Channel(
         id=resolved_id, title="Kênh test", photo=types.PhotoEmpty(id=0),
         date=None, access_hash=123456789))
@@ -330,3 +333,36 @@ async def test_resolve_khong_tim_thay_kenh_la_permanent():
             await resolve_target_channel(make_cfg())
     assert not isinstance(ei.value, TransientUploadError)
     client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_cua_bot_bao_loi_ro_rang():
+    """Session bot: Telegram chặn get_dialogs (BotMethodInvalidError) nên không
+    bao giờ có access_hash. Phải báo ĐÚNG nguyên nhân ngay, không để lỗi rơi
+    xuống thành 'Could not find the input entity' (đổ sang TARGET_CHANNEL).
+
+    Ca thật: dán bot token vào prompt 'Please enter your phone (or bot token)'.
+    """
+    from worker.uploader import resolve_target_channel
+    client = make_client()
+    client.is_bot = AsyncMock(return_value=True)
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        with pytest.raises(UploadError, match="session của BOT"):
+            await resolve_target_channel(make_cfg())
+    # Chết trước khi chạm get_dialogs, và vẫn disconnect.
+    client.get_dialogs.assert_not_awaited()
+    client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_is_bot_loi_thi_van_resolve_tiep():
+    """is_bot hỏng (RPC lạ) không được chặn đường — cứ thử resolve như cũ."""
+    from worker.uploader import resolve_target_channel
+    client = make_client()
+    client.is_bot = AsyncMock(side_effect=RuntimeError("rpc lạ"))
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        channel = await resolve_target_channel(make_cfg())
+    assert isinstance(channel, types.InputPeerChannel)
+

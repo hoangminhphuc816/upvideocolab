@@ -125,3 +125,16 @@ def test_diagnose_required_chi_can_bon_bien(monkeypatch):
     cfg = load_config(required=DIAGNOSE_REQUIRED)
     assert cfg.target_channel == -100123
 
+
+def test_la_bot_token_phan_biet_token_va_so_dien_thoai():
+    """Telethon hoi gop 'phone (or bot token)'. Nhan dien dung token de chan
+    truoc khi tao ra session CUA BOT (khong dung duoc cho get_dialogs)."""
+    from tools.make_session import la_bot_token
+
+    assert la_bot_token("8123456789:AAHfakeTOKENvalue-abc_123")
+    assert la_bot_token(" 123:xyz ")
+    assert not la_bot_token("+84901234567")
+    assert not la_bot_token("84901234567")
+    assert not la_bot_token("abc:xyz")
+    assert not la_bot_token("")
+
