@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from telethon import TelegramClient, utils
 from telethon.sessions import StringSession
 
-from worker.config import Config, load_config
+from worker.config import Config, DIAGNOSE_REQUIRED, load_config
 from worker.uploader import UploadError
 
 
@@ -86,7 +86,8 @@ async def diagnose(cfg: Config) -> dict:
 
 
 def main() -> int:
-    cfg = load_config()
+    # Chỉ cần 4 biến đăng nhập Telegram — không cần Sheet/GCP/bot như worker.
+    cfg = load_config(required=DIAGNOSE_REQUIRED)
     try:
         info = asyncio.run(diagnose(cfg))
     except UploadError as e:

@@ -20,6 +20,10 @@ _REQUIRED = [
 # Sweep (cron) chỉ cần các biến này — không cần session Telethon
 SWEEP_REQUIRED = ["GCP_SA_JSON", "SHEET_ID", "BOT_TOKEN", "OWNER_CHAT_ID"]
 
+# Chẩn đoán TARGET_CHANNEL chỉ cần đăng nhập Telegram — không cần Sheet, GCP, bot.
+DIAGNOSE_REQUIRED = ["TELETHON_SESSION", "TELEGRAM_API_ID", "TELEGRAM_API_HASH",
+                     "TARGET_CHANNEL"]
+
 
 @dataclass(frozen=True)
 class Config:

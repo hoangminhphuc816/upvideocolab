@@ -111,3 +111,17 @@ def test_requirements_cryptg_pin_matches_bootstrap():
     req = Path("requirements.txt").read_text()
     assert "cryptg==0.5.2" in req
     assert 'python_version < "3.15"' in req
+
+def test_diagnose_required_chi_can_bon_bien(monkeypatch):
+    """Tool chẩn đoán không được đòi Sheet/GCP/bot — chỉ 4 biến Telegram."""
+    from worker.config import DIAGNOSE_REQUIRED, load_config
+    for k in DIAGNOSE_REQUIRED:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("TELETHON_SESSION", "s")
+    monkeypatch.setenv("TELEGRAM_API_ID", "1")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "h")
+    monkeypatch.setenv("TARGET_CHANNEL", "-100123")
+    # Không set GCP_SA_JSON/SHEET_ID/BOT_TOKEN/OWNER_CHAT_ID — vẫn phải qua.
+    cfg = load_config(required=DIAGNOSE_REQUIRED)
+    assert cfg.target_channel == -100123
+
