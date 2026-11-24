@@ -248,6 +248,15 @@ def _assume_owns_job(request, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _stub_resolve_target_channel(monkeypatch):
+    """Preflight chạm Telegram thật; test nào cần hành vi khác thì patch đè."""
+    monkeypatch.setattr(
+        "worker.main.resolve_target_channel",
+        AsyncMock(return_value=MagicMock(name="peer")),
+    )
+
+
 def make_job_addr(url="https://x/v.mp4", url_alt=""):
     job = make_job()
     job.url = url
@@ -398,6 +407,22 @@ def test_permanent_substrings():
     assert not _permanent("HTTP 429 khi tải")
     assert not _permanent("mất kết nối giữa chừng")
     assert not _permanent("không kết nối được Telegram: timeout")
+
+
+def test_permanent_khong_khop_loi_transient():
+    """Message transient KHÔNG được khớp marker permanent nào."""
+    from worker.main import _permanent
+    assert not _permanent(
+        "TARGET_CHANNEL tạm thời không truy cập được (-1004401263522): "
+        "FloodWaitError: A wait of 3600 seconds is required")
+
+
+def test_permanent_khop_loi_access_hash_min():
+    """Entity min/không hash là cấu hình vĩnh viễn — retry cùng session vô ích."""
+    from worker.main import _permanent
+    assert _permanent(
+        "TARGET_CHANNEL không dùng được (-1004401263522): Channel without "
+        "access_hash or min info cannot be input. Chạy tools/check_telegram_target.py")
 
 
 @pytest.mark.asyncio
@@ -665,7 +690,7 @@ async def test_upload_nhip_tim_throttle_300s(tmp_path):
     clock = scripted_clock(1000.0, 1299.0, 1300.0)  # nhịp đầu, 299s (bỏ), 300s (touch)
     sent = {}
 
-    async def fake_upload(cfg, path, caption, heartbeat=None):
+    async def fake_upload(cfg, path, caption, *, channel, heartbeat=None):
         sent["heartbeat"] = heartbeat
         return 777
 
@@ -745,3 +770,69 @@ def test_permanent_nhan_loi_auth_key_chet_vinh_vien():
         "TELETHON_SESSION không hợp lệ: ValueError: string argument should contain only ASCII characters",
     ]:
         assert _permanent(reason), reason
+
+
+@pytest.mark.asyncio
+async def test_run_once_preflight_chay_truoc_khi_tai():
+    """TARGET_CHANNEL sai phải chết TRƯỚC download — không đốt 1 lượt tải."""
+    from worker.uploader import UploadError
+    q = MagicMock()
+    q.next_job.return_value = make_job()
+    q.claim.return_value = True
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.resolve_target_channel",
+               side_effect=UploadError(
+                   "TARGET_CHANNEL không truy cập được (-100123): ValueError: "
+                   "Could not find the input entity for PeerChannel")) as pre, \
+         patch("worker.main.download_to_file") as dl, \
+         patch("worker.main.notify_failed") as nf:
+        from worker.main import run_once
+        rc = await run_once(make_cfg())
+    pre.assert_awaited_once()
+    dl.assert_not_called()
+    assert rc == 2
+    assert statuses_written(q) == ["FAILED"]
+    nf.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_once_preflight_loi_tam_thoi_thi_retry():
+    """Lỗi tạm thời ở preflight KHÔNG được đánh FAILED — phải raise để sweep RETRY."""
+    from worker.uploader import TransientUploadError
+    q = MagicMock()
+    q.next_job.return_value = make_job()
+    q.claim.return_value = True
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.resolve_target_channel",
+               side_effect=TransientUploadError(
+                   "TARGET_CHANNEL tạm thời không truy cập được (-100123): "
+                   "FloodWaitError: A wait of 3600 seconds is required")), \
+         patch("worker.main.download_to_file") as dl, \
+         patch("worker.main.notify_failed") as nf, \
+         pytest.raises(TransientUploadError):
+        from worker.main import run_once
+        await run_once(make_cfg())
+    dl.assert_not_called()            # không tải video
+    nf.assert_not_called()            # không notify FAILED
+    assert statuses_written(q) == []  # không set FAILED
+
+
+@pytest.mark.asyncio
+async def test_run_once_truyen_channel_vao_upload():
+    """channel resolve được phải chảy xuống upload_to_channel, không resolve lại."""
+    q = MagicMock()
+    q.next_job.return_value = make_job()
+    q.claim.return_value = True
+    channel = MagicMock(name="resolved-peer")
+    with patch("worker.main.SheetQueue", return_value=q), \
+         patch("worker.main.resolve_target_channel", return_value=channel), \
+         patch("worker.main.probe_range_support", return_value=False), \
+         patch("worker.main.download_to_file", return_value=("/tmp/x.mp4", 10)), \
+         patch("worker.main.validate_video"), \
+         patch("worker.main._owns_job", return_value=True), \
+         patch("worker.main.upload_to_channel", return_value=777) as up, \
+         patch("worker.main.notify_done"), \
+         patch("os.unlink"):
+        from worker.main import run_once
+        await run_once(make_cfg())
+    assert up.call_args.kwargs["channel"] is channel

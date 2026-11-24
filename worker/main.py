@@ -16,7 +16,7 @@ from worker.downloader import (
 )
 from worker.notifier import NotifyError, notify_done, notify_failed
 from worker.sheet_queue import SheetQueue, checkpoint_dl_bytes
-from worker.uploader import UploadError, upload_to_channel
+from worker.uploader import UploadError, TransientUploadError, resolve_target_channel, upload_to_channel
 
 log = logging.getLogger("worker")
 
@@ -58,6 +58,9 @@ PERMANENT_SUBSTRINGS = (
     "ApiIdInvalid",
     # Marker ổn định từ uploader.py khi StringSession raise mọi lớp lỗi cắt cụt/padding/struct/ASCII.
     "TELETHON_SESSION không hợp lệ",
+    # get_entity trả entity min/không hash (chưa từng "gặp" kênh trong session
+    # này) — retry cùng session không bao giờ nạp được hash.
+    "TARGET_CHANNEL không dùng được",
 )
 
 # Nhịp tim Sheet trong cả 2 pha. Phải < 15 phút (sweep_stale mặc định) với biên rộng:
@@ -153,6 +156,20 @@ async def run_once(cfg: Config) -> int:
         log.warning("claim %s thất bại — worker khác đã lấy", job.job_id)
         return 0
 
+    # Preflight TRƯỚC pha tải: TARGET_CHANNEL sai/phải-mint-lại-session phải chết
+    # trong vài giây, không đốt một lượt tải video (có thể 30+ phút, 1.5GB).
+    try:
+        channel = await resolve_target_channel(cfg)
+    except TransientUploadError:
+        raise
+    except UploadError as e:
+        reason = str(e)
+        if not _permanent(reason):
+            raise
+        queue.set_status(job.job_id, "FAILED", error=reason)
+        _try_notify_failed(cfg, job.job_id, reason)
+        return 2
+
     path = None
     part = None
     try:
@@ -212,6 +229,7 @@ async def run_once(cfg: Config) -> int:
         queue.set_status(job.job_id, "UPLOADING")
         try:
             msg_id = await upload_to_channel(cfg, path, caption=job.job_id,
+                                             channel=channel,
                                              heartbeat=upload_heartbeat)
         except UploadError:
             queue.set_checkpoint(job.job_id, "dl:full")

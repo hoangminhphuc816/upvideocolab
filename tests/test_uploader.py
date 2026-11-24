@@ -1,11 +1,16 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncio
 import binascii
 import pytest
 import struct
 
+from telethon import utils
+from telethon.errors import FloodWaitError
+from telethon.tl import types
+
 from worker.config import Config
-from worker.uploader import upload_to_channel, UploadError
+from worker.uploader import upload_to_channel, UploadError, TransientUploadError, resolve_target_channel
 
 
 def make_cfg():
@@ -18,58 +23,40 @@ def make_cfg():
 
 
 def make_client(msg_id: int = 777, *, resolved_id: int = 4401263522):
-    """Client giả có đủ API mà upload_to_channel gọi, kể cả get_entity.
-
-    get_entity PHẢI là AsyncMock: code thật `await client.get_entity(...)`, và
-    MagicMock thường sẽ ném TypeError khi await.
-    """
+    """Client giả có đủ API mà upload_to_channel gọi, kể cả get_entity."""
     msg = MagicMock()
     msg.id = msg_id
     client = MagicMock()
     client.start = AsyncMock()
     client.disconnect = AsyncMock()
     client.get_dialogs = AsyncMock()
-    client.get_entity = AsyncMock(return_value=MagicMock(id=resolved_id))
+    client.get_entity = AsyncMock(return_value=types.Channel(
+        id=resolved_id, title="Kênh test", photo=types.PhotoEmpty(id=0),
+        date=None, access_hash=123456789))
     client.send_file = AsyncMock(return_value=msg)
     return client
 
 
-@pytest.mark.asyncio
-async def test_upload_resolve_kenh_truoc_khi_send():
-    """Phải get_entity() tường minh, không dựa vào get_dialogs may rủi.
+def upload_with_client(client, cfg=None, channel=None, **kw):
+    """Gọi upload_to_channel với InputPeer đã resolve sẵn (preflight đã chạy)."""
+    channel = channel or utils.get_input_peer(client.get_entity.return_value)
+    return upload_to_channel(
+        cfg or make_cfg(), "/tmp/v.mp4", "JOB-1",
+        channel=channel,
+        **kw,
+    )
 
-    get_dialogs bị bọc `except Exception: pass`: khi nó fail, entity cache rỗng,
-    send_file gửi InputChannel(access_hash=0) => ChannelInvalidError =>
-    ValueError: Could not find the input entity.
-    """
-    client = make_client()
-    with patch("worker.uploader.TelegramClient", return_value=client), \
-         patch("worker.uploader.StringSession"):
-        await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
-    client.get_entity.assert_awaited_once_with(-100123)
-    assert client.send_file.call_args[0][0] is client.get_entity.return_value
-
-
-@pytest.mark.asyncio
-async def test_upload_bao_loi_ro_khi_khong_resolve_duoc_kenh():
-    client = make_client()
-    client.get_entity = AsyncMock(
-        side_effect=ValueError("Could not find the input entity for PeerChannel(4401263522)"))
-    with patch("worker.uploader.TelegramClient", return_value=client), \
-         patch("worker.uploader.StringSession"):
-        with pytest.raises(UploadError, match="TARGET_CHANNEL"):
-            await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
-    client.send_file.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_upload_returns_message_id_and_disconnects():
     client = make_client()
+    expected = utils.get_input_peer(client.get_entity.return_value)
     with patch("worker.uploader.TelegramClient", return_value=client) as tc, \
          patch("worker.uploader.StringSession"):
-        mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+        mid = await upload_with_client(client, channel=expected)
     assert mid == 777
     args, kwargs = client.send_file.call_args
-    assert args[0] is client.get_entity.return_value
+    assert args[0] is expected
     assert kwargs["caption"] == "JOB-1"
     assert kwargs["supports_streaming"] is True
     assert callable(kwargs["progress_callback"])
@@ -83,7 +70,7 @@ async def test_upload_returns_message_id_and_disconnects():
     assert kwargs_tc["system_lang_code"] == "en-US"
     assert "connections" not in kwargs_tc
     client.disconnect.assert_awaited()
-    client.get_entity.assert_awaited_once_with(-100123)
+    client.get_entity.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -93,9 +80,9 @@ async def test_upload_wraps_errors():
     with patch("worker.uploader.TelegramClient", return_value=client), \
          patch("worker.uploader.StringSession"):
         with pytest.raises(UploadError, match="boom"):
-            await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+            await upload_with_client(client)
     client.disconnect.assert_awaited()
-    client.get_entity.assert_awaited_once_with(-100123)
+    client.get_entity.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -106,12 +93,12 @@ async def test_upload_passes_generated_thumb():
          patch("worker.uploader.StringSession"), \
          patch("worker.uploader.probe_video_metadata", return_value=(640, 360, 120)), \
          patch("worker.uploader.extract_thumbnail", return_value="/tmp/thumb.jpg") as et:
-        mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+        mid = await upload_with_client(client)
     assert mid == 777
     assert et.call_args.kwargs.get("seek_seconds") == 30.0  # min(120/4, 30)
     kwargs = client.send_file.call_args.kwargs
     assert kwargs["thumb"] == "/tmp/thumb.jpg"
-    client.get_entity.assert_awaited_once_with(-100123)
+    client.get_entity.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -122,10 +109,10 @@ async def test_upload_without_thumb_still_works():
          patch("worker.uploader.StringSession"), \
          patch("worker.uploader.probe_video_metadata", return_value=(640, 360, 3)), \
          patch("worker.uploader.extract_thumbnail", return_value=None):
-        mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+        mid = await upload_with_client(client)
     assert mid == 778
     assert client.send_file.call_args.kwargs["thumb"] is None
-    client.get_entity.assert_awaited_once_with(-100123)
+    client.get_entity.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -136,7 +123,11 @@ async def test_upload_start_failure_wraps_and_disconnects():
     with patch("worker.uploader.TelegramClient", return_value=client), \
          patch("worker.uploader.StringSession"):
         with pytest.raises(UploadError, match="start boom"):
-            await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+            await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1",
+                                    channel=utils.get_input_peer(types.Channel(
+                                        id=4401263522, title="Kênh test",
+                                        photo=types.PhotoEmpty(id=0),
+                                        date=None, access_hash=123456789)))
     client.disconnect.assert_awaited()
 
 
@@ -150,9 +141,9 @@ async def test_upload_deletes_thumb_on_success_and_on_error(tmp_path):
          patch("worker.uploader.StringSession"), \
          patch("worker.uploader.probe_video_metadata", return_value=(640, 360, 120)), \
          patch("worker.uploader.extract_thumbnail", return_value=str(thumb)):
-        await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+        await upload_with_client(client)
     assert not thumb.exists()
-    client.get_entity.assert_awaited_once_with(-100123)
+    client.get_entity.assert_not_awaited()
 
     thumb.write_bytes(b"\xff\xd8jpeg")
     client.send_file = AsyncMock(side_effect=RuntimeError("boom"))
@@ -161,9 +152,9 @@ async def test_upload_deletes_thumb_on_success_and_on_error(tmp_path):
          patch("worker.uploader.probe_video_metadata", return_value=(640, 360, 120)), \
          patch("worker.uploader.extract_thumbnail", return_value=str(thumb)), \
          pytest.raises(UploadError, match="boom"):
-        await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+        await upload_with_client(client)
     assert not thumb.exists()
-    assert client.get_entity.call_count == 2
+    assert client.get_entity.call_count == 0
 
 
 @pytest.mark.asyncio
@@ -183,11 +174,10 @@ async def test_upload_goi_heartbeat_moi_tick_tien_do():
          patch("worker.uploader.StringSession"), \
          patch("worker.uploader.probe_video_metadata", return_value=(0, 0, 0)), \
          patch("worker.uploader.extract_thumbnail", return_value=None):
-        mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1",
-                                      heartbeat=lambda: beats.append(1))
+        mid = await upload_with_client(client, heartbeat=lambda: beats.append(1))
     assert mid == 900
     assert len(beats) == 2
-    client.get_entity.assert_awaited_once_with(-100123)
+    client.get_entity.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -209,9 +199,61 @@ async def test_upload_heartbeat_loi_khong_abort_upload():
          patch("worker.uploader.StringSession"), \
          patch("worker.uploader.probe_video_metadata", return_value=(0, 0, 0)), \
          patch("worker.uploader.extract_thumbnail", return_value=None):
-        mid = await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1", heartbeat=boom)
+        mid = await upload_with_client(client, heartbeat=boom)
     assert mid == 901
-    client.get_entity.assert_awaited_once_with(-100123)
+    client.get_entity.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_channel_tra_ve_input_peer_va_disconnect():
+    from worker.uploader import resolve_target_channel
+    client = make_client()
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        channel = await resolve_target_channel(make_cfg())
+    assert isinstance(channel, types.InputPeerChannel)
+    assert channel.access_hash == 123456789
+    assert channel.channel_id == 4401263522
+    client.get_dialogs.assert_awaited_once()
+    client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_channel_loi_bao_dung_id_va_disconnect():
+    from worker.uploader import resolve_target_channel
+    client = make_client()
+    client.get_entity = AsyncMock(
+        side_effect=ValueError("Could not find the input entity for PeerChannel(channel_id=4401263522)"))
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        with pytest.raises(UploadError, match=r"TARGET_CHANNEL.*-100123"):
+            await resolve_target_channel(make_cfg())
+    client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_entity_min_khong_hash_bi_chan_som():
+    from worker.uploader import resolve_target_channel
+    client = make_client()
+    client.get_entity = AsyncMock(return_value=types.Channel(
+        id=4401263522, title="K", photo=types.PhotoEmpty(id=0), date=None,
+        access_hash=None))
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        with pytest.raises(UploadError, match="access_hash"):
+            await resolve_target_channel(make_cfg())
+    client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upload_dung_channel_duoc_truyen_vao_khong_resolve_lai():
+    channel = types.InputPeerChannel(4401263522, 123456789)
+    client = make_client()
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1", channel=channel)
+    client.get_entity.assert_not_awaited()
+    assert client.send_file.call_args[0][0] is channel
 
 
 @pytest.mark.asyncio
@@ -228,6 +270,45 @@ async def test_upload_session_hong_bao_loi_ro_rang():
         with patch("worker.uploader.StringSession", side_effect=err) as ss, \
              patch("worker.uploader.TelegramClient") as tc:
             with pytest.raises(UploadError, match="TELETHON_SESSION không hợp lệ"):
-                await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1")
+                await upload_to_channel(make_cfg(), "/tmp/v.mp4", "JOB-1",
+                                        channel=utils.get_input_peer(types.Channel(
+                                            id=4401263522, title="Kênh test",
+                                            photo=types.PhotoEmpty(id=0),
+                                            date=None, access_hash=123456789)))
         ss.assert_called_once_with("sess")
         tc.assert_not_called()
+
+
+@pytest.mark.parametrize("exc", [
+    FloodWaitError(request=None, capture=3600),
+    asyncio.TimeoutError("read timeout"),
+    ConnectionError("mạng rớt"),
+])
+@pytest.mark.asyncio
+async def test_resolve_loi_tam_thoi_la_transient(exc):
+    """FloodWait/timeout/mất mạng phải retry được — không đánh FAILED.
+
+    FloodWait 3600s > flood_sleep_threshold=120 nên Telethon RAISE (≤120s thì nó
+    tự sleep, không bao giờ tới tay code này).
+    """
+    client = make_client()
+    client.get_dialogs = AsyncMock(side_effect=exc)
+    client.get_entity = AsyncMock(side_effect=exc)
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        with pytest.raises(TransientUploadError):
+            await resolve_target_channel(make_cfg())
+    client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_khong_tim_thay_kenh_la_permanent():
+    client = make_client()
+    client.get_entity = AsyncMock(
+        side_effect=ValueError("Could not find the input entity for PeerChannel(channel_id=4401263522)"))
+    with patch("worker.uploader.TelegramClient", return_value=client), \
+         patch("worker.uploader.StringSession"):
+        with pytest.raises(UploadError) as ei:
+            await resolve_target_channel(make_cfg())
+    assert not isinstance(ei.value, TransientUploadError)
+    client.disconnect.assert_awaited()

@@ -5,7 +5,8 @@ import asyncio
 import logging
 import os
 
-from telethon import TelegramClient
+from telethon import TelegramClient, utils
+from telethon.errors import FloodWaitError
 from telethon.sessions import StringSession
 from telethon.tl.types import DocumentAttributeVideo
 
@@ -19,6 +20,13 @@ class UploadError(Exception):
     pass
 
 
+class TransientUploadError(UploadError):
+    """Lỗi tạm thời ở pha resolve/upload — sweep RETRY cứu được.
+    ``_permanent()`` trong worker/main.py trả False cho lớp này, nên job về
+    RETRY thay vì FAILED.
+    """
+
+
 async def _safe_disconnect(client: TelegramClient) -> None:
     try:
         await client.disconnect()
@@ -26,14 +34,90 @@ async def _safe_disconnect(client: TelegramClient) -> None:
         log.exception("disconnect lỗi (bỏ qua)")
 
 
-async def upload_to_channel(cfg: Config, path: str, caption: str,
-                            heartbeat=None) -> int:
+_TRANSIENT_EXC = (FloodWaitError, asyncio.TimeoutError, TimeoutError, ConnectionError, OSError)
+
+
+def _raise_target_error(target: int, exc: Exception) -> None:
+    """Ném đúng lớp lỗi: tạm thời ⇒ TransientUploadError, cấu hình ⇒ UploadError."""
+    detail = f"{type(exc).__name__}: {exc}"
+    if isinstance(exc, _TRANSIENT_EXC):
+        raise TransientUploadError(
+            f"TARGET_CHANNEL tạm thời không truy cập được ({target}): {detail}"
+        ) from None
+    raise UploadError(
+        f"TARGET_CHANNEL không truy cập được ({target}): {detail}"
+    ) from None
+
+
+async def resolve_target_channel(cfg: Config):
+    """Resolve TARGET_CHANNEL thành InputPeer có access_hash — gọi TRƯỚC khi tải.
+
+    `StringSession` là MemorySession: `_entities` không được serialize (chỉ
+    dc_id/ip/port/auth_key), nên mỗi VM mới bắt đầu với cache rỗng. `get_dialogs`
+    là cách duy nhất nạp access_hash. Nếu nó fail (FloodWait, timeout), Telethon
+    rơi xuống `GetChannelsRequest(InputChannel(id, access_hash=0))` ⇒
+    ChannelInvalidError ⇒ ValueError khó hiểu. Gọi sớm để lỗi nêu đích danh
+    TARGET_CHANNEL và không đốt một lượt tải video.
+
+    Client LUÔN được disconnect trước khi hàm trả về hoặc ném.
+    """
     try:
         session = StringSession(cfg.telethon_session)
     except Exception as e:
-        # Secret bị cắt cụt/sai/ký tự lạ: Telethon raise nhiều lớp khác nhau
-        # (binascii.Incorrect padding, Invalid base64-encoded string, struct.error,
-        # ValueError non-ASCII). Chuẩn hoá về 1 câu ổn định để phân loại vĩnh viễn.
+        raise UploadError(
+            f"TELETHON_SESSION không hợp lệ: {type(e).__name__}: {e}"
+        ) from None
+
+    try:
+        client = TelegramClient(
+            session,
+            cfg.api_id,
+            cfg.api_hash,
+            device_model="Desktop",
+            system_version="Windows 11 x64",
+            app_version="7.2.8",
+            lang_code="en",
+            system_lang_code="en-US",
+            flood_sleep_threshold=120,
+        )
+    except Exception as e:
+        raise UploadError(f"không tạo được TelegramClient: {type(e).__name__}: {e}") from None
+
+    try:
+        await asyncio.wait_for(client.start(), timeout=180)
+    except Exception as e:
+        await _safe_disconnect(client)
+        raise UploadError(f"không kết nối được Telegram: {type(e).__name__}: {e}") from None
+
+    try:
+        try:
+            await client.get_dialogs()
+        except Exception as e:
+            log.exception("warm entity cache lỗi (vẫn thử get_entity trực tiếp)")
+            if isinstance(e, _TRANSIENT_EXC):
+                _raise_target_error(cfg.target_channel, e)
+
+        try:
+            entity = await client.get_entity(cfg.target_channel)
+        except Exception as e:
+            _raise_target_error(cfg.target_channel, e)
+
+        try:
+            return utils.get_input_peer(entity)
+        except TypeError as e:
+            raise UploadError(
+                f"TARGET_CHANNEL không dùng được ({cfg.target_channel}): {e}. "
+                f"Chạy tools/check_telegram_target.py — access_hash phải khác 0."
+            ) from None
+    finally:
+        await _safe_disconnect(client)
+
+
+async def upload_to_channel(cfg: Config, path: str, caption: str, *,
+                            channel, heartbeat=None) -> int:
+    try:
+        session = StringSession(cfg.telethon_session)
+    except Exception as e:
         raise UploadError(
             f"TELETHON_SESSION không hợp lệ: {type(e).__name__}: {e}"
         ) from None
@@ -60,26 +144,6 @@ async def upload_to_channel(cfg: Config, path: str, caption: str,
     except Exception as e:
         await _safe_disconnect(client)
         raise UploadError(f"không kết nối được Telegram: {type(e).__name__}: {e}") from None
-
-    try:
-        # limit=None (mặc định) nạp hết dialog; đây là warm cache best-effort.
-        await client.get_dialogs()
-    except Exception:
-        # KHÔNG được nuốt: chính lỗi ở bước này là thứ khiến send_file sau đó
-        # chết với "Could not find the input entity" mà log không có dấu vết.
-        log.exception("warm entity cache lỗi (vẫn thử get_entity trực tiếp)")
-
-    # Gọi tường minh: get_dialogs ở trên có thể đã fail, khi đó cache rỗng và
-    # send_file(-100…) gửi InputChannel(access_hash=0) ⇒ ChannelInvalidError ⇒
-    # ValueError khó hiểu. Resolve ở đây để lỗi nêu đích danh TARGET_CHANNEL.
-    try:
-        channel = await client.get_entity(cfg.target_channel)
-    except Exception as e:
-        await _safe_disconnect(client)
-        raise UploadError(
-            f"TARGET_CHANNEL không truy cập được ({cfg.target_channel}): "
-            f"{type(e).__name__}: {e}"
-        ) from None
 
     last = -1
 
